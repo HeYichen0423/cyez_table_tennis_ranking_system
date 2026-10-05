@@ -129,12 +129,12 @@
     <div class="modal auth-modal">
       <button class="modal-close" id="authClose" aria-label="关闭">×</button>
       <div class="auth-tabs"><button class="auth-tab active" data-auth-tab="login">登录</button><button class="auth-tab" data-auth-tab="signup">注册</button></div>
-      <form id="loginForm" class="auth-form">
+      <form id="loginForm" class="auth-form auth-form-login">
         <div class="field"><label for="loginUsername">用户名</label><input id="loginUsername" autocomplete="username" required placeholder="例如 zhangsan"></div>
         <div class="field"><label for="loginPassword">密码</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
         <button class="btn btn-primary btn-lg full-width" type="submit">登录</button>
       </form>
-      <form id="signupForm" class="auth-form" hidden>
+      <form id="signupForm" class="auth-form auth-form-signup is-hidden" aria-hidden="true">
         <div class="field"><label for="signupRealName">真实姓名</label><input id="signupRealName" autocomplete="name" required maxlength="40" placeholder="将显示在排行榜和比赛记录中"></div>
         <div class="field"><label for="signupUsername">用户名</label><input id="signupUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required placeholder="3-24位字母、数字、下划线、点或短横线"></div>
         <div class="field"><label for="signupPassword">密码</label><input id="signupPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="至少 8 位"></div>
