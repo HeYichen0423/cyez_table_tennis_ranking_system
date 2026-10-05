@@ -11,11 +11,21 @@ const supabaseClient = isConfigured ? createClient(CONFIG.url, CONFIG.anonKey, {
 const INITIAL_RATING = 1500;
 const K = 32;
 const COMPETITIONS = {
-  friendly: { id: 'friendly', name: '友谊赛', weight: 0.2 },
-  club: { id: 'club', name: '社团组织比赛', weight: 0.5 },
-  school_qualifier: { id: 'school_qualifier', name: '校级比赛预选赛', weight: 0.5 },
-  district_qualifier: { id: 'district_qualifier', name: '区赛 / 市赛预选赛', weight: 0.8 },
-  school_official: { id: 'school_official', name: '校级正式比赛', weight: 1.0 }
+  // 新规则：这些 ID 用于今后新录入的比赛。
+  friendly_new: { id: 'friendly_new', name: '友谊赛', weight: 0.3 },
+  monthly: { id: 'monthly', name: '月赛', weight: 0.5 },
+  small_qualifier: { id: 'small_qualifier', name: '小赛预选赛', weight: 0.6 },
+  club_new: { id: 'club_new', name: '社团赛', weight: 0.7 },
+  major_qualifier: { id: 'major_qualifier', name: '大赛预选赛', weight: 0.7 },
+  district_city: { id: 'district_city', name: '区赛 / 市赛', weight: 0.8 },
+  special: { id: 'special', name: '专项赛', weight: 1.0 },
+
+  // 兼容历史记录：旧 ID 继续使用原来的权重，避免规则升级后历史积分被悄悄改变。
+  legacy_friendly: { id: 'legacy_friendly', name: '历史：友谊赛', weight: 0.2, visible: false },
+  legacy_club: { id: 'legacy_club', name: '历史：社团组织比赛', weight: 0.5, visible: false },
+  legacy_school_qualifier: { id: 'legacy_school_qualifier', name: '历史：校级比赛预选赛', weight: 0.5, visible: false },
+  legacy_district_qualifier: { id: 'legacy_district_qualifier', name: '历史：区赛 / 市赛预选赛', weight: 0.8, visible: false },
+  legacy_school_official: { id: 'legacy_school_official', name: '历史：校级正式比赛', weight: 1.0, visible: false }
 };
 const STATUS_NAMES = {
   pending_opponent: '待对手确认',
@@ -111,7 +121,18 @@ function formatRating(n) { return Number(n || 0).toFixed(1); }
 function formatDate(v) { return new Date(v).toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 function formatDateLong(v) { return new Date(v).toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 function formatPct(n) { return `${(Number(n || 0) * 100).toFixed(1)}%`; }
-function competition(id) { return COMPETITIONS[id] || { name: id || '未知', weight: 0 }; }
+function competition(id) {
+  const direct = COMPETITIONS[id];
+  if (direct) return direct;
+  const legacyMap = {
+    friendly: COMPETITIONS.legacy_friendly,
+    club: COMPETITIONS.legacy_club,
+    school_qualifier: COMPETITIONS.legacy_school_qualifier,
+    district_qualifier: COMPETITIONS.legacy_district_qualifier,
+    school_official: COMPETITIONS.legacy_school_official
+  };
+  return legacyMap[id] || { name: id || '未知', weight: 0 };
+}
 function profile(id) { return state.profiles.find(p => p.id === id); }
 function activeProfiles() { return state.profiles.filter(p => !p.is_banned); }
 function isStaff() { return !!currentProfile && !currentProfile.is_banned && ['admin','moderator'].includes(currentProfile.role); }
@@ -188,8 +209,8 @@ function rankingRows() {
 }
 
 function populateCompetition() {
-  els.competitionType.innerHTML = Object.values(COMPETITIONS).map(c => `<option value="${c.id}">${esc(c.name)}（${c.weight}）</option>`).join('');
-  els.competitionType.value = 'school_official';
+  els.competitionType.innerHTML = Object.values(COMPETITIONS).filter(c => c.visible !== false).map(c => `<option value="${c.id}">${esc(c.name)}（${c.weight}）</option>`).join('');
+  els.competitionType.value = 'special';
 }
 function setDefaultDate() {
   const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
@@ -391,32 +412,10 @@ function showToast(message, type='success') {
 
 function openAuth(mode='login') { els.authBackdrop.hidden=false; switchAuthTab(mode); setTimeout(()=> (authMode==='login'?els.loginUsername:els.signupRealName).focus(),30); }
 function closeAuth() { els.authBackdrop.hidden=true; }
-function switchAuthTab(mode='login') {
-  authMode = mode === 'signup' ? 'signup' : 'login';
-  document.querySelectorAll('.auth-tab').forEach(b=>
-    b.classList.toggle('active', b.dataset.authTab === authMode)
-  );
-
-  const showLogin = authMode === 'login';
-  const showSignup = authMode === 'signup';
-
-  // Use an explicit CSS class in addition to the hidden attribute.
-  // This prevents .auth-form { display:grid } from ever making the
-  // inactive form visible.
-  els.loginForm.classList.toggle('is-hidden', !showLogin);
-  els.signupForm.classList.toggle('is-hidden', !showSignup);
-  els.loginForm.hidden = !showLogin;
-  els.signupForm.hidden = !showSignup;
-  els.loginForm.setAttribute('aria-hidden', String(!showLogin));
-  els.signupForm.setAttribute('aria-hidden', String(!showSignup));
-
-  // Disable controls in the hidden form so browser validation cannot
-  // interfere with the visible form.
-  els.loginUsername.disabled = !showLogin;
-  els.loginPassword.disabled = !showLogin;
-  els.signupRealName.disabled = !showSignup;
-  els.signupUsername.disabled = !showSignup;
-  els.signupPassword.disabled = !showSignup;
+function switchAuthTab(mode) {
+  authMode=mode;
+  document.querySelectorAll('.auth-tab').forEach(b=>b.classList.toggle('active',b.dataset.authTab===mode));
+  els.loginForm.hidden=mode!=='login'; els.signupForm.hidden=mode!=='signup';
 }
 function openProfile() {
   if (!currentProfile) return openAuth();
@@ -442,7 +441,7 @@ async function signUp() {
   const { data, error }=await supabaseClient.auth.signUp({email,password,options:{data:{real_name:realName,username}}});
   if (error) throw error;
   if (!data.session) throw new Error('注册成功，但当前 Supabase 仍要求邮箱确认。请在 Auth 设置中关闭 Confirm Email 后重试。');
-  closeAuth(); await refreshData(); showToast('注册成功，欢迎加入 CYEZ。');
+  closeAuth(); await refreshData(); showToast('感谢注册CYEZ乒乓社积分系统');
 }
 
 async function signIn() {
