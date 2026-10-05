@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="CYEZ乒乓球积分系统：实时排行榜、比赛记录、个人交战、账号与管理员管理。">
+  <title>CYEZ乒乓球积分系统</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">C</div>
+      <div class="brand-title">CYEZ乒乓球积分系统</div>
+    </div>
+    <div class="top-actions" id="authActions">
+      <span class="live-pill" id="liveStatus"><i></i> 实时同步中</span>
+      <button class="btn btn-primary" id="loginBtn">登录 / 注册</button>
+    </div>
+  </header>
+
+  <nav class="nav-tabs" aria-label="页面导航">
+    <button class="nav-tab active" data-view="dashboard">总览</button>
+    <button class="nav-tab" data-view="match">录入比赛</button>
+    <button class="nav-tab" data-view="ranking">排行榜</button>
+    <button class="nav-tab" data-view="history">历史记录</button>
+    <button class="nav-tab" data-view="headtohead">个人交战</button>
+    <button class="nav-tab" data-view="rules">规则说明</button>
+    <button class="nav-tab staff-only" data-view="admin" hidden>管理后台</button>
+  </nav>
+
+  <main class="container">
+    <section class="view active" id="view-dashboard">
+      <div class="page-header">
+        <div><div class="eyebrow">CYEZ PING-PONG</div><h1>积分总览</h1><p>排行榜、比赛结果和账号状态会实时同步。</p></div>
+        <button class="btn btn-primary" data-go-view="match">＋ 录入比赛</button>
+      </div>
+      <div class="stats-grid" id="dashboardStats"></div>
+      <div class="card account-banner" id="accountBanner"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div><h2>当前排行榜</h2><span class="muted">按当前积分排序</span></div><button class="text-btn" data-go-view="ranking">查看全部 →</button></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>#</th><th>选手</th><th>积分</th><th>场次</th><th>胜率</th></tr></thead><tbody id="dashboardRankingBody"></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>最近比赛</h2><span class="muted">实时更新</span></div><button class="text-btn" data-go-view="history">查看全部 →</button></div>
+          <div id="dashboardRecent"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-match">
+      <div class="page-header"><div><div class="eyebrow">MATCH ENTRY</div><h1>录入比赛</h1><p>登录后，比赛双方中的任意一人都可以提交；对手确认后才会正式计入排行榜。</p></div></div>
+      <div class="card notice-card" id="matchAuthNotice" hidden></div>
+      <div class="match-layout" id="matchEditor" hidden>
+        <form class="card match-card" id="matchForm">
+          <div class="form-section-title">比赛信息</div>
+          <div class="form-grid">
+            <div class="field"><label for="matchDate">比赛日期</label><input id="matchDate" type="datetime-local" required></div>
+            <div class="field"><label for="competitionType">比赛类型</label><select id="competitionType" required></select></div>
+          </div>
+          <div class="form-section-title">双方选手</div>
+          <div class="players-vs">
+            <div class="player-panel"><div class="panel-label">A 选手</div><select id="playerA" required></select><div class="rating-chip" id="ratingA">1500 分</div></div>
+            <div class="vs-badge">VS</div>
+            <div class="player-panel"><div class="panel-label">B 选手</div><select id="playerB" required></select><div class="rating-chip" id="ratingB">1500 分</div></div>
+          </div>
+          <div class="current-user-note" id="currentParticipantNote"></div>
+          <div class="form-section-title">最终比分</div>
+          <div class="score-entry">
+            <div class="score-box"><label for="scoreA">A 得分</label><input id="scoreA" type="number" min="0" max="99" value="4" required></div>
+            <div class="colon">:</div>
+            <div class="score-box"><label for="scoreB">B 得分</label><input id="scoreB" type="number" min="0" max="99" value="0" required></div>
+          </div>
+          <div class="score-presets" id="scorePresets">
+            <button type="button" data-score="4:0">4:0</button><button type="button" data-score="4:1">4:1</button><button type="button" data-score="4:2">4:2</button><button type="button" data-score="4:3">4:3</button><button type="button" data-score="3:2">3:2</button><button type="button" data-score="2:1">2:1</button><button type="button" data-score="1:0">1:0</button>
+          </div>
+          <div class="preview-box" id="matchPreview"><div class="preview-empty">选择双方并录入比分后，这里会显示积分变化预览。</div></div>
+          <div class="form-actions"><button class="btn btn-primary btn-lg" type="submit">提交比赛，等待对手确认</button><button class="btn btn-ghost" type="reset">重置</button></div>
+        </form>
+        <aside class="card side-card">
+          <div class="card-head"><div><h2>本场计算</h2><span class="muted">实时预览</span></div></div>
+          <div class="formula-mini"><div class="formula-row"><span>基础系数 K</span><strong>32</strong></div><div class="formula-row"><span>比赛级别 C</span><strong id="previewC">—</strong></div><div class="formula-row"><span>比分系数 M</span><strong id="previewM">—</strong></div><div class="formula-row"><span>预期胜率 E</span><strong id="previewE">—</strong></div></div>
+          <div class="callout">胜者得分 = 32 × C × M × (1 − E)<br>负者扣除同样分数。</div>
+          <div class="muted small">提示：比分越悬殊，M 越高；赛前积分差越大，爆冷一方的积分变化越大。只有“已确认”的比赛进入排行榜。</div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="view" id="view-ranking">
+      <div class="page-header"><div><div class="eyebrow">LEADERBOARD</div><h1>排行榜</h1><p>积分越高，代表系统记录的相对竞技水平越高。</p></div><div class="header-controls"><input class="search-input" id="rankingSearch" placeholder="搜索选手…"></div></div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>选手</th><th>积分</th><th>场次</th><th>胜-负</th><th>胜率</th><th>状态</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div>
+    </section>
+
+    <section class="view" id="view-history">
+      <div class="page-header"><div><div class="eyebrow">MATCH HISTORY</div><h1>历史交战记录</h1><p>公开记录只展示已经确认、生效的比赛；自己的待确认记录也会显示在这里。</p></div><div class="header-controls"><select id="historyFilter"><option value="all">全部比赛</option><option value="approved">已生效</option><option value="pending_opponent">待确认</option><option value="rejected">已拒绝</option><option value="cancelled">已撤销</option></select></div></div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>A 选手</th><th>比分</th><th>B 选手</th><th>类型</th><th>状态</th><th>A 变化</th><th>操作</th></tr></thead><tbody id="historyBody"></tbody></table></div></div>
+    </section>
+
+    <section class="view" id="view-headtohead">
+      <div class="page-header"><div><div class="eyebrow">HEAD TO HEAD</div><h1>个人交战</h1><p>选择两名选手，查看累计战绩、积分表现与每场比赛。</p></div></div>
+      <div class="card h2h-select-card"><div class="form-grid"><div class="field"><label for="h2hA">选手 A</label><select id="h2hA"></select></div><div class="field"><label for="h2hB">选手 B</label><select id="h2hB"></select></div></div></div>
+      <div id="h2hContent"></div>
+    </section>
+
+    <section class="view" id="view-rules">
+      <div class="page-header"><div><div class="eyebrow">RULES</div><h1>积分规则</h1><p>系统采用 Elo 预期胜率 + 比分权重 + 比赛规模权重，并保持单场零和。</p></div></div>
+      <div class="rules-grid">
+        <div class="card"><h2>1. 初始积分</h2><p>所有新选手默认 <strong>1500 分</strong>。</p><div class="formula">R<sub>new</sub> = 1500</div></div>
+        <div class="card"><h2>2. 预期胜率</h2><p>先根据赛前积分差判断比赛结果是否符合预期。</p><div class="formula">E = 1 / (1 + 10<sup>(R<sub>对手</sub>−R<sub>自己</sub>)/400</sup>)</div></div>
+        <div class="card"><h2>3. 比分系数 M</h2><p>比分越悬殊，M 越高；4:3、3:2 等胶着比分的 M 较低。</p><div class="formula small-formula">M = min(1.50, 0.70 + 0.80 × ((W−L)/(W+L))<sup>0.65</sup> × (ln(1+W+L)/ln5)<sup>0.35</sup>)</div></div>
+        <div class="card"><h2>4. 最终积分变化</h2><p>胜者和负者使用完全相反的变化值。</p><div class="formula">ΔR = 32 × C × M × (1 − E)</div></div>
+      </div>
+      <div class="card"><div class="card-head"><div><h2>比赛规模权重</h2><span class="muted">C</span></div></div><div class="weight-table"><div><span>友谊赛</span><strong>0.2</strong></div><div><span>社团组织比赛</span><strong>0.5</strong></div><div><span>校级比赛预选赛</span><strong>0.5</strong></div><div><span>区赛 / 市赛预选赛</span><strong>0.8</strong></div><div><span>校级正式比赛</span><strong>1.0</strong></div></div></div>
+      <div class="card example-card"><h2>几个直观例子</h2><div class="example-grid"><div><span>1500 vs 1500，校级正式赛，4:0</span><strong>胜者 +24.0</strong></div><div><span>1500 vs 1500，校级正式赛，4:3</span><strong>胜者 +15.2</strong></div><div><span>1700 胜 1500，校级正式赛，4:0</span><strong>1700 方约 +11.5</strong></div><div><span>1500 爆冷胜 1700，校级正式赛，4:3</span><strong>1500 方约 +23.0</strong></div></div></div>
+      <div class="card"><h2>系统状态说明</h2><p>积分只由“已确认、生效”的比赛参与计算。待对手确认的比赛、被拒绝的比赛和已撤销的比赛不会影响排行榜。系统按比赛时间重新回放生效比赛，因此补录较早比赛后，后续积分可能随之重新计算。</p></div>
+    </section>
+
+    <section class="view" id="view-admin">
+      <div class="page-header"><div><div class="eyebrow">ADMIN CONSOLE</div><h1>管理后台</h1><p>管理员可以管理账号与副管理员；管理员和副管理员都可以审核/撤销比赛。</p></div></div>
+      <div id="adminContent"></div>
+    </section>
+  </main>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <div class="modal-backdrop" id="authBackdrop" hidden>
+    <div class="modal auth-modal">
+      <button class="modal-close" id="authClose" aria-label="关闭">×</button>
+      <div class="auth-tabs"><button class="auth-tab active" data-auth-tab="login">登录</button><button class="auth-tab" data-auth-tab="signup">注册</button></div>
+      <form id="loginForm" class="auth-form">
+        <div class="field"><label for="loginUsername">用户名</label><input id="loginUsername" autocomplete="username" required placeholder="例如 zhangsan"></div>
+        <div class="field"><label for="loginPassword">密码</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+        <button class="btn btn-primary btn-lg full-width" type="submit">登录</button>
+      </form>
+      <form id="signupForm" class="auth-form" hidden>
+        <div class="field"><label for="signupRealName">真实姓名</label><input id="signupRealName" autocomplete="name" required maxlength="40" placeholder="将显示在排行榜和比赛记录中"></div>
+        <div class="field"><label for="signupUsername">用户名</label><input id="signupUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required placeholder="3-24位字母、数字、下划线、点或短横线"></div>
+        <div class="field"><label for="signupPassword">密码</label><input id="signupPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="至少 8 位"></div>
+        <div class="auth-note">注册后即可登录。真实姓名会公开显示在积分系统中；用户名不可修改。</div>
+        <button class="btn btn-primary btn-lg full-width" type="submit">注册并登录</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="profileBackdrop" hidden>
+    <div class="modal">
+      <button class="modal-close" id="profileClose" aria-label="关闭">×</button>
+      <h2>我的账号</h2>
+      <div id="profileSummary" class="profile-summary"></div>
+      <form id="profileForm" class="auth-form">
+        <div class="field"><label for="profileRealName">真实姓名</label><input id="profileRealName" maxlength="40" required></div>
+        <div class="field"><label>用户名</label><input id="profileUsername" disabled></div>
+        <button class="btn btn-primary full-width" type="submit">保存姓名</button>
+      </form>
+      <button class="btn btn-danger full-width" id="logoutBtn">退出登录</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabase-config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
