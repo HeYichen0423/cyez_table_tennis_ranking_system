@@ -27,6 +27,7 @@
     <button class="nav-tab" data-view="history">历史记录</button>
     <button class="nav-tab" data-view="headtohead">个人交战</button>
     <button class="nav-tab" data-view="rules">规则说明</button>
+    <button class="nav-tab" data-view="tournaments">赛事</button>
     <button class="nav-tab staff-only" data-view="admin" hidden>管理后台</button>
   </nav>
 
@@ -90,7 +91,7 @@
 
     <section class="view" id="view-ranking">
       <div class="page-header"><div><div class="eyebrow">LEADERBOARD</div><h1>排行榜</h1><p>积分越高，代表系统记录的相对竞技水平越高。</p></div><div class="header-controls"><input class="search-input" id="rankingSearch" placeholder="搜索选手…"></div></div>
-      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>选手</th><th>积分</th><th>场次</th><th>胜-负</th><th>胜率</th><th>状态</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>选手</th><th>积分</th><th>场次</th><th>胜-负</th><th>胜率</th><th>状态</th><th>赛事</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div>
     </section>
 
     <section class="view" id="view-history">
@@ -117,6 +118,25 @@
       <div class="card"><h2>系统状态说明</h2><p>积分只由“已确认、生效”的比赛参与计算。待对手确认的比赛、被拒绝的比赛和已撤销的比赛不会影响排行榜。系统按比赛时间重新回放生效比赛，因此补录较早比赛后，后续积分可能随之重新计算。</p></div>
     </section>
 
+    <section class="view" id="view-tournaments">
+      <div class="page-header">
+        <div><div class="eyebrow">TOURNAMENTS</div><h1>赛事中心</h1><p>查看赛事签位表、参赛名单、赛果和赛后积分。只有管理员/副管理员可以创建赛事、填入首轮签位并录入结果。</p></div>
+        <button class="btn btn-primary" id="createTournamentBtn" hidden>＋ 创建赛事</button>
+      </div>
+      <div class="tournament-layout">
+        <aside class="card tournament-sidebar">
+          <div class="card-head"><div><h2>赛事列表</h2><span class="muted">实时同步</span></div></div>
+          <div class="tournament-filters">
+            <input id="tournamentSearch" class="search-input full-width" placeholder="搜索赛事…">
+            <select id="tournamentFormatFilter" class="full-width"><option value="all">全部赛制</option><option value="group_knockout">小组循环 + 淘汰赛制</option><option value="single_elim">单败淘汰制</option><option value="double_elim">双败淘汰制</option></select>
+            <select id="tournamentPlayerFilter" class="full-width"><option value="">所有选手</option></select>
+          </div>
+          <div id="tournamentList" class="tournament-list"></div>
+        </aside>
+        <section id="tournamentDetail" class="tournament-detail"></section>
+      </div>
+    </section>
+
     <section class="view" id="view-admin">
       <div class="page-header"><div><div class="eyebrow">ADMIN CONSOLE</div><h1>管理后台</h1><p>管理员可以管理账号与副管理员；管理员和副管理员都可以审核/撤销比赛。</p></div></div>
       <div id="adminContent"></div>
@@ -124,6 +144,28 @@
   </main>
 
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <div class="modal-backdrop" id="tournamentCreateBackdrop" hidden>
+    <div class="modal tournament-create-modal">
+      <button class="modal-close" id="tournamentCreateClose" aria-label="关闭">×</button>
+      <h2>创建赛事</h2>
+      <p class="muted">创建后赛事会立即出现在所有人的赛事中心。淘汰赛首轮可在赛事页面调整签位。</p>
+      <form id="tournamentCreateForm" class="auth-form">
+        <div class="field"><label for="tournamentName">赛事名称</label><input id="tournamentName" maxlength="80" required placeholder="例如：CYEZ 10 月月赛"></div>
+        <div class="form-grid">
+          <div class="field"><label for="tournamentCompetition">赛事级别</label><select id="tournamentCompetition" required><option value="friendly_new">友谊赛（0.3）</option><option value="monthly" selected>月赛（0.5）</option><option value="small_qualifier">小赛预选赛（0.6）</option><option value="club_new">社团赛（0.7）</option><option value="major_qualifier">大赛预选赛（0.7）</option><option value="district_city">区赛 / 市赛（0.8）</option><option value="special">专项赛（1.0）</option></select></div>
+          <div class="field"><label for="tournamentStart">开始时间</label><input id="tournamentStart" type="datetime-local" required></div>
+          <div class="field"><label for="tournamentFormat">赛制</label><select id="tournamentFormat" required><option value="group_knockout">小组循环 + 淘汰赛制</option><option value="single_elim">单败淘汰制</option><option value="double_elim">双败淘汰制</option></select></div>
+          <div class="field"><label for="tournamentGroupCount">小组数量</label><select id="tournamentGroupCount"><option value="2">2 组</option><option value="3">3 组</option><option value="4" selected>4 组</option><option value="5">5 组</option><option value="6">6 组</option><option value="8">8 组</option></select></div>
+          <div class="field"><label for="tournamentAdvance">每组晋级</label><select id="tournamentAdvance"><option value="1">1 人</option><option value="2" selected>2 人</option><option value="3">3 人</option></select></div>
+        </div>
+        <div class="form-section-title">参赛选手</div>
+        <div class="tournament-player-checklist" id="tournamentPlayerChecklist"></div>
+        <div class="auth-note" id="tournamentCreateNote">建议每组 3-6 人；参赛选手默认按当前积分高低作为种子顺序。</div>
+        <div class="form-actions"><button class="btn btn-ghost" type="button" id="tournamentCreateClose2">取消</button><button class="btn btn-primary" type="submit">创建赛事并生成签位</button></div>
+      </form>
+    </div>
+  </div>
 
   <div class="modal-backdrop" id="authBackdrop" hidden>
     <div class="modal auth-modal">
@@ -167,6 +209,20 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="adminCreateUserBackdrop" hidden>
+    <div class="modal">
+      <button class="modal-close" id="adminCreateUserClose" aria-label="关闭">×</button>
+      <h2>管理员直接创建账号</h2>
+      <p class="muted">无需填写密码。系统会使用固定初始密码 <strong>11111111</strong> 创建账号，用户首次登录后必须修改密码。</p>
+      <form id="adminCreateUserForm" class="auth-form">
+        <div class="field"><label for="adminCreateRealName">真实姓名</label><input id="adminCreateRealName" maxlength="40" required placeholder="例如：张三"></div>
+        <div class="field"><label for="adminCreateUsername">用户名</label><input id="adminCreateUsername" autocomplete="off" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required placeholder="例如 zhangsan"></div>
+        <div class="password-hint">初始密码：<strong>11111111</strong>。请把用户名和初始密码安全地交给本人。</div>
+        <div class="form-actions"><button class="btn btn-ghost" type="button" id="adminCreateUserCancel">取消</button><button class="btn btn-primary" type="submit">创建账号</button></div>
+      </form>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="adminResetBackdrop" hidden>
     <div class="modal">
       <button class="modal-close" id="adminResetClose" aria-label="关闭">×</button>
@@ -183,5 +239,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabase-config.js"></script>
   <script src="./app.js"></script>
+  <script src="./tournament.js"></script>
 </body>
 </html>
