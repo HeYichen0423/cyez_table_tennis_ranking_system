@@ -149,7 +149,7 @@
     <div class="modal tournament-create-modal">
       <button class="modal-close" id="tournamentCreateClose" aria-label="关闭">×</button>
       <h2>创建赛事</h2>
-      <p class="muted">创建后赛事会立即出现在所有人的赛事中心。淘汰赛首轮可在赛事页面调整签位。</p>
+      <p class="muted">创建后赛事会立即出现在所有人的赛事中心。签位和分组由管理员/副管理员手动填写，不会自动抽签。</p>
       <form id="tournamentCreateForm" class="auth-form">
         <div class="field"><label for="tournamentName">赛事名称</label><input id="tournamentName" maxlength="80" required placeholder="例如：CYEZ 10 月月赛"></div>
         <div class="form-grid">
@@ -161,8 +161,8 @@
         </div>
         <div class="form-section-title">参赛选手</div>
         <div class="tournament-player-checklist" id="tournamentPlayerChecklist"></div>
-        <div class="auth-note" id="tournamentCreateNote">建议每组 3-6 人；参赛选手默认按当前积分高低作为种子顺序。</div>
-        <div class="form-actions"><button class="btn btn-ghost" type="button" id="tournamentCreateClose2">取消</button><button class="btn btn-primary" type="submit">创建赛事并生成签位</button></div>
+        <div class="auth-note" id="tournamentCreateNote">请选择参赛选手；赛事创建后由管理员/副管理员手动填写分组和签位。</div>
+        <div class="form-actions"><button class="btn btn-ghost" type="button" id="tournamentCreateClose2">取消</button><button class="btn btn-primary" type="submit">创建赛事</button></div>
       </form>
     </div>
   </div>
