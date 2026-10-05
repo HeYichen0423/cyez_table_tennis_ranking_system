@@ -391,10 +391,32 @@ function showToast(message, type='success') {
 
 function openAuth(mode='login') { els.authBackdrop.hidden=false; switchAuthTab(mode); setTimeout(()=> (authMode==='login'?els.loginUsername:els.signupRealName).focus(),30); }
 function closeAuth() { els.authBackdrop.hidden=true; }
-function switchAuthTab(mode) {
-  authMode=mode;
-  document.querySelectorAll('.auth-tab').forEach(b=>b.classList.toggle('active',b.dataset.authTab===mode));
-  els.loginForm.hidden=mode!=='login'; els.signupForm.hidden=mode!=='signup';
+function switchAuthTab(mode='login') {
+  authMode = mode === 'signup' ? 'signup' : 'login';
+  document.querySelectorAll('.auth-tab').forEach(b=>
+    b.classList.toggle('active', b.dataset.authTab === authMode)
+  );
+
+  const showLogin = authMode === 'login';
+  const showSignup = authMode === 'signup';
+
+  // Use an explicit CSS class in addition to the hidden attribute.
+  // This prevents .auth-form { display:grid } from ever making the
+  // inactive form visible.
+  els.loginForm.classList.toggle('is-hidden', !showLogin);
+  els.signupForm.classList.toggle('is-hidden', !showSignup);
+  els.loginForm.hidden = !showLogin;
+  els.signupForm.hidden = !showSignup;
+  els.loginForm.setAttribute('aria-hidden', String(!showLogin));
+  els.signupForm.setAttribute('aria-hidden', String(!showSignup));
+
+  // Disable controls in the hidden form so browser validation cannot
+  // interfere with the visible form.
+  els.loginUsername.disabled = !showLogin;
+  els.loginPassword.disabled = !showLogin;
+  els.signupRealName.disabled = !showSignup;
+  els.signupUsername.disabled = !showSignup;
+  els.signupPassword.disabled = !showSignup;
 }
 function openProfile() {
   if (!currentProfile) return openAuth();
