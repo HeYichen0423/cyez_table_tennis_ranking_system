@@ -23,3 +23,5 @@
   border-top: 1px solid var(--border);
   padding-top: 1rem;
 }
+
+.manual-bye-btn{display:block;margin-top:7px}.tournament-actions .btn-danger{border-color:#e9caca}.data-table select{min-width:90px}
