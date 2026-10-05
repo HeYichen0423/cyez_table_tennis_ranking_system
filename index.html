@@ -180,7 +180,7 @@
         <div class="field"><label for="signupRealName">真实姓名</label><input id="signupRealName" autocomplete="name" required maxlength="40" placeholder="将显示在排行榜和比赛记录中"></div>
         <div class="field"><label for="signupUsername">用户名</label><input id="signupUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required placeholder="3-24位字母、数字、下划线、点或短横线"></div>
         <div class="field"><label for="signupPassword">密码</label><input id="signupPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="至少 8 位"></div>
-        <div class="auth-note">注册后即可登录。真实姓名会公开显示在积分系统中；用户名不可修改。</div>
+        <div class="auth-note">注册后即可登录。真实姓名会公开显示在积分系统中；用户名之后可以在“我的账号”中修改。</div>
         <button class="btn btn-primary btn-lg full-width" type="submit">注册并登录</button>
       </form>
     </div>
@@ -194,8 +194,9 @@
       <form id="profileForm" class="auth-form">
         <div class="profile-section-title">基本资料</div>
         <div class="field"><label for="profileRealName">真实姓名</label><input id="profileRealName" maxlength="40" required></div>
-        <div class="field"><label>用户名</label><input id="profileUsername" disabled></div>
-        <button class="btn btn-primary full-width" type="submit">保存姓名</button>
+        <div class="field"><label for="profileUsername">用户名</label><input id="profileUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required></div>
+        <div class="password-hint">用户名需为 3–24 位小写字母、数字、下划线、点或短横线。修改后请使用新用户名登录。</div>
+        <button class="btn btn-primary full-width" type="submit">保存资料</button>
       </form>
       <form id="passwordForm" class="auth-form password-form">
         <div class="profile-section-title">修改密码</div>
