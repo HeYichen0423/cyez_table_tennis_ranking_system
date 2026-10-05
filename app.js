@@ -286,6 +286,7 @@ function matchActionHtml(m) {
   const isOpponent = m.status==='pending_opponent' && mySide && m.submitted_by !== currentUser.id;
   if (isOpponent && !currentProfile?.is_banned) return `<button class="text-btn" data-confirm-match="${m.id}">确认</button> <button class="text-btn danger-text" data-reject-match="${m.id}">拒绝</button>`;
   if (isStaff() && m.status==='approved') return `<button class="text-btn danger-text" data-cancel-match="${m.id}">撤销</button>`;
+  if (isStaff() && (m.status==='rejected' || m.status==='cancelled')) return `<button class="text-btn danger-text" data-delete-match="${m.id}">彻底删除</button>`;
   if (isStaff() && m.status==='pending_opponent') return `<button class="text-btn danger-text" data-reject-match="${m.id}">拒绝</button>`;
   return '';
 }
@@ -324,7 +325,7 @@ function renderAdmin() {
       <div class="stat-card"><div class="stat-label">封禁账号</div><div class="stat-value">${state.profiles.filter(p=>p.is_banned).length}</div></div>
     </div>
     <div class="card"><div class="card-head"><div><h2>待处理比赛</h2><span class="muted">副管理员和管理员可以审核；参赛对手可以确认。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>提交时间</th><th>比赛</th><th>比分</th><th>级别</th><th>提交人</th><th>操作</th></tr></thead><tbody>${pending.map(m=>`<tr><td>${formatDate(m.created_at)}</td><td class="name-cell">${esc(playerLabel(m.player_a_id))} vs ${esc(playerLabel(m.player_b_id))}</td><td><strong>${m.score_a}:${m.score_b}</strong></td><td>${esc(competition(m.competition_id).name)}</td><td>${esc(playerLabel(m.submitted_by))}</td><td>${matchActionHtml(m)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">没有待处理比赛。</div></td></tr>'}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以封禁账号、添加/取消副管理员。没有任何比赛记录的账号还可以永久删除；有历史比赛的账号请使用封禁。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以封禁账号、添加/取消副管理员。没有已生效比赛的账号可以永久删除；未生效、已拒绝或已撤销的关联记录会在删除账号时一并清理。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
     ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更和比赛审核/撤销会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
   `;
   if (isAdmin()) loadAuditLogs();
@@ -501,6 +502,22 @@ async function cancelMatch(id) {
   catch(e){showToast(e.message || '撤销失败。','error');}
 }
 
+async function deleteMatch(id) {
+  if (!isAdmin()) return;
+  const m=state.matches.find(x=>x.id===id); if(!m) return;
+  if (!['rejected','cancelled'].includes(m.status)) { showToast('只有已拒绝或已撤销的比赛记录可以彻底删除。','error'); return; }
+  const ok = confirm(`确定永久删除这条历史记录吗？\n\n${playerLabel(m.player_a_id)} ${m.score_a}:${m.score_b} ${playerLabel(m.player_b_id)}\n\n删除后无法恢复。`);
+  if (!ok) return;
+  try {
+    const {error}=await supabaseClient.rpc('admin_delete_match',{target_match_id:id});
+    if(error) throw error;
+    await refreshData();
+    showToast('历史比赛记录已彻底删除。');
+  } catch(e) {
+    showToast(e.message || '历史比赛删除失败。','error');
+  }
+}
+
 async function updateRole(userId, role) {
   if (!isAdmin()) return;
   try { const {error}=await supabaseClient.from('profiles').update({role}).eq('id',userId); if(error)throw error; await refreshData(); showToast('账号角色已更新。'); }
@@ -518,14 +535,15 @@ async function toggleBan(userId) {
 async function deleteUser(userId) {
   if (!isAdmin()) return;
   const p=profile(userId); if(!p || userId===currentUser?.id) return;
-  const linkedMatches = state.matches.filter(m => m.player_a_id===userId || m.player_b_id===userId || m.submitted_by===userId).length;
-  if (linkedMatches > 0) {
-    showToast(`账号“${p.real_name}（@${p.username}）”有 ${linkedMatches} 条比赛相关记录。为保护历史积分，不能永久删除，请使用封禁。`, 'error');
+  const linked = state.matches.filter(m => m.player_a_id===userId || m.player_b_id===userId || m.submitted_by===userId);
+  const approvedMatches = linked.filter(m => m.status==='approved');
+  if (approvedMatches.length > 0) {
+    showToast(`账号“${p.real_name}（@${p.username}）”还有 ${approvedMatches.length} 条已生效比赛。请先逐场撤销这些比赛，才能永久删除账号。`, 'error');
     return;
   }
-  const ok = confirm(`确定永久删除账号“${p.real_name}（@${p.username}）”吗？
-
-此操作会删除该账号的登录信息和选手资料，且无法恢复。`);
+  const removableMatches = linked.filter(m => ['pending_opponent','rejected','cancelled'].includes(m.status)).length;
+  const extra = removableMatches ? `\n\n该账号还有 ${removableMatches} 条未生效/已撤销记录，删除账号时会一并永久清理。` : '';
+  const ok = confirm(`确定永久删除账号“${p.real_name}（@${p.username}）”吗？${extra}\n\n此操作会删除该账号的登录信息和选手资料，且无法恢复。`);
   if (!ok) return;
   try {
     const { error } = await supabaseClient.rpc('admin_delete_user', { target_user_id: userId });
@@ -587,6 +605,7 @@ function bindEvents() {
     const confirmBtn=e.target.closest('[data-confirm-match]'); if(confirmBtn){await confirmMatch(confirmBtn.dataset.confirmMatch);return;}
     const rejectBtn=e.target.closest('[data-reject-match]'); if(rejectBtn){await rejectMatch(rejectBtn.dataset.rejectMatch);return;}
     const cancelBtn=e.target.closest('[data-cancel-match]'); if(cancelBtn){await cancelMatch(cancelBtn.dataset.cancelMatch);return;}
+    const deleteMatchBtn=e.target.closest('[data-delete-match]'); if(deleteMatchBtn){await deleteMatch(deleteMatchBtn.dataset.deleteMatch);return;}
     const banBtn=e.target.closest('[data-ban-user]'); if(banBtn){await toggleBan(banBtn.dataset.banUser);return;}
     const deleteBtn=e.target.closest('[data-delete-user]'); if(deleteBtn){await deleteUser(deleteBtn.dataset.deleteUser);return;}
     if(e.target.id==='refreshAuditBtn'){loadAuditLogs();return;}
