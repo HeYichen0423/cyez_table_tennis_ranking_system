@@ -112,8 +112,8 @@
         <div class="card"><h2>3. 比分系数 M</h2><p>比分越悬殊，M 越高；4:3、3:2 等胶着比分的 M 较低。</p><div class="formula small-formula">M = min(1.50, 0.70 + 0.80 × ((W−L)/(W+L))<sup>0.65</sup> × (ln(1+W+L)/ln5)<sup>0.35</sup>)</div></div>
         <div class="card"><h2>4. 最终积分变化</h2><p>胜者和负者使用完全相反的变化值。</p><div class="formula">ΔR = 32 × C × M × (1 − E)</div></div>
       </div>
-      <div class="card"><div class="card-head"><div><h2>比赛规模权重</h2><span class="muted">C</span></div></div><div class="weight-table"><div><span>友谊赛</span><strong>0.2</strong></div><div><span>社团组织比赛</span><strong>0.5</strong></div><div><span>校级比赛预选赛</span><strong>0.5</strong></div><div><span>区赛 / 市赛预选赛</span><strong>0.8</strong></div><div><span>校级正式比赛</span><strong>1.0</strong></div></div></div>
-      <div class="card example-card"><h2>几个直观例子</h2><div class="example-grid"><div><span>1500 vs 1500，校级正式赛，4:0</span><strong>胜者 +24.0</strong></div><div><span>1500 vs 1500，校级正式赛，4:3</span><strong>胜者 +15.2</strong></div><div><span>1700 胜 1500，校级正式赛，4:0</span><strong>1700 方约 +11.5</strong></div><div><span>1500 爆冷胜 1700，校级正式赛，4:3</span><strong>1500 方约 +23.0</strong></div></div></div>
+      <div class="card"><div class="card-head"><div><h2>比赛规模权重</h2><span class="muted">C</span></div></div><div class="weight-table"><div><span>友谊赛</span><strong>0.3</strong></div><div><span>月赛</span><strong>0.5</strong></div><div><span>小赛预选赛</span><strong>0.6</strong></div><div><span>社团赛</span><strong>0.7</strong></div><div><span>大赛预选赛</span><strong>0.7</strong></div><div><span>区赛 / 市赛</span><strong>0.8</strong></div><div><span>专项赛</span><strong>1.0</strong></div></div></div>
+      <div class="card example-card"><h2>几个直观例子</h2><div class="example-grid"><div><span>1500 vs 1500，专项赛，4:0</span><strong>胜者 +24.0</strong></div><div><span>1500 vs 1500，专项赛，4:3</span><strong>胜者 +15.2</strong></div><div><span>1700 胜 1500，专项赛，4:0</span><strong>1700 方约 +11.5</strong></div><div><span>1500 爆冷胜 1700，专项赛，4:3</span><strong>1500 方约 +23.0</strong></div></div></div>
       <div class="card"><h2>系统状态说明</h2><p>积分只由“已确认、生效”的比赛参与计算。待对手确认的比赛、被拒绝的比赛和已撤销的比赛不会影响排行榜。系统按比赛时间重新回放生效比赛，因此补录较早比赛后，后续积分可能随之重新计算。</p></div>
     </section>
 
@@ -129,12 +129,12 @@
     <div class="modal auth-modal">
       <button class="modal-close" id="authClose" aria-label="关闭">×</button>
       <div class="auth-tabs"><button class="auth-tab active" data-auth-tab="login">登录</button><button class="auth-tab" data-auth-tab="signup">注册</button></div>
-      <form id="loginForm" class="auth-form auth-form-login">
+      <form id="loginForm" class="auth-form">
         <div class="field"><label for="loginUsername">用户名</label><input id="loginUsername" autocomplete="username" required placeholder="例如 zhangsan"></div>
         <div class="field"><label for="loginPassword">密码</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
         <button class="btn btn-primary btn-lg full-width" type="submit">登录</button>
       </form>
-      <form id="signupForm" class="auth-form auth-form-signup is-hidden" aria-hidden="true">
+      <form id="signupForm" class="auth-form" hidden>
         <div class="field"><label for="signupRealName">真实姓名</label><input id="signupRealName" autocomplete="name" required maxlength="40" placeholder="将显示在排行榜和比赛记录中"></div>
         <div class="field"><label for="signupUsername">用户名</label><input id="signupUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required placeholder="3-24位字母、数字、下划线、点或短横线"></div>
         <div class="field"><label for="signupPassword">密码</label><input id="signupPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="至少 8 位"></div>
