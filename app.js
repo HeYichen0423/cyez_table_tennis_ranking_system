@@ -43,6 +43,7 @@ const els = {
   liveStatus: $('liveStatus'),
   authActions: $('authActions'),
   loginBtn: $('loginBtn'),
+  signupBtn: $('signupBtn'),
   dashboardStats: $('dashboardStats'),
   dashboardRankingBody: $('dashboardRankingBody'),
   dashboardRecent: $('dashboardRecent'),
@@ -257,7 +258,7 @@ function renderDashboard() {
 
 function renderAccountBanner() {
   if (!currentProfile) {
-    els.accountBanner.innerHTML = `<div><strong>登录后可提交比赛</strong><span> 所有人都可以查看实时排行榜和已生效比赛。</span></div><button class="btn btn-primary" id="bannerLoginBtn">登录 / 注册</button>`;
+    els.accountBanner.innerHTML = `<div><strong>登录后可提交比赛</strong><span> 所有人都可以查看实时排行榜和已生效比赛。</span></div><div class="banner-actions"><button class="btn btn-ghost" id="bannerLoginBtn">登录</button><button class="btn btn-primary" id="bannerSignupBtn">注册</button></div>`;
     return;
   }
   if (currentProfile.is_banned) {
@@ -323,7 +324,7 @@ function renderAdmin() {
       <div class="stat-card"><div class="stat-label">封禁账号</div><div class="stat-value">${state.profiles.filter(p=>p.is_banned).length}</div></div>
     </div>
     <div class="card"><div class="card-head"><div><h2>待处理比赛</h2><span class="muted">副管理员和管理员可以审核；参赛对手可以确认。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>提交时间</th><th>比赛</th><th>比分</th><th>级别</th><th>提交人</th><th>操作</th></tr></thead><tbody>${pending.map(m=>`<tr><td>${formatDate(m.created_at)}</td><td class="name-cell">${esc(playerLabel(m.player_a_id))} vs ${esc(playerLabel(m.player_b_id))}</td><td><strong>${m.score_a}:${m.score_b}</strong></td><td>${esc(competition(m.competition_id).name)}</td><td>${esc(playerLabel(m.submitted_by))}</td><td>${matchActionHtml(m)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">没有待处理比赛。</div></td></tr>'}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以封禁账号、添加/取消副管理员。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以封禁账号、添加/取消副管理员。没有任何比赛记录的账号还可以永久删除；有历史比赛的账号请使用封禁。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
     ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更和比赛审核/撤销会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
   `;
   if (isAdmin()) loadAuditLogs();
@@ -339,13 +340,19 @@ async function loadAuditLogs() {
 function updateAuthUi() {
   document.querySelectorAll('.staff-only').forEach(el=>el.hidden=!isStaff());
   if (!currentProfile) {
-    els.loginBtn.textContent = '登录 / 注册';
-    els.loginBtn.className = 'btn btn-primary';
-    els.loginBtn.onclick = openAuth;
+    els.loginBtn.textContent = '登录';
+    els.loginBtn.className = 'btn btn-ghost';
+    els.loginBtn.onclick = () => openAuth('login');
+    els.signupBtn.hidden = false;
+    els.signupBtn.textContent = '注册';
+    els.signupBtn.className = 'btn btn-primary';
+    els.signupBtn.onclick = () => openAuth('signup');
   } else {
     els.loginBtn.textContent = `${currentProfile.real_name} · 我的账号`;
     els.loginBtn.className = 'btn btn-ghost user-button';
     els.loginBtn.onclick = openProfile;
+    els.signupBtn.hidden = true;
+    els.signupBtn.onclick = null;
   }
   const canWrite = currentProfile && !currentProfile.is_banned;
   els.matchEditor.hidden = !canWrite;
@@ -370,7 +377,7 @@ function showToast(message, type='success') {
   const t=document.createElement('div'); t.className=`toast ${type}`; t.textContent=message; els.toastRegion.appendChild(t); setTimeout(()=>t.remove(),4500);
 }
 
-function openAuth() { els.authBackdrop.hidden=false; switchAuthTab(authMode); setTimeout(()=> (authMode==='login'?els.loginUsername:els.signupRealName).focus(),30); }
+function openAuth(mode='login') { els.authBackdrop.hidden=false; switchAuthTab(mode); setTimeout(()=> (authMode==='login'?els.loginUsername:els.signupRealName).focus(),30); }
 function closeAuth() { els.authBackdrop.hidden=true; }
 function switchAuthTab(mode) {
   authMode=mode;
@@ -508,6 +515,28 @@ async function toggleBan(userId) {
   catch(e){showToast(e.message||'账号状态更新失败。','error');}
 }
 
+async function deleteUser(userId) {
+  if (!isAdmin()) return;
+  const p=profile(userId); if(!p || userId===currentUser?.id) return;
+  const linkedMatches = state.matches.filter(m => m.player_a_id===userId || m.player_b_id===userId || m.submitted_by===userId).length;
+  if (linkedMatches > 0) {
+    showToast(`账号“${p.real_name}（@${p.username}）”有 ${linkedMatches} 条比赛相关记录。为保护历史积分，不能永久删除，请使用封禁。`, 'error');
+    return;
+  }
+  const ok = confirm(`确定永久删除账号“${p.real_name}（@${p.username}）”吗？
+
+此操作会删除该账号的登录信息和选手资料，且无法恢复。`);
+  if (!ok) return;
+  try {
+    const { error } = await supabaseClient.rpc('admin_delete_user', { target_user_id: userId });
+    if (error) throw error;
+    await refreshData();
+    showToast(`账号“${p.real_name}”已永久删除。`);
+  } catch(e) {
+    showToast(e.message || '账号删除失败。', 'error');
+  }
+}
+
 async function saveProfile(e) {
   e.preventDefault();
   try {
@@ -552,16 +581,18 @@ function bindEvents() {
     const tab=e.target.closest('[data-view]'); if(tab){navigate(tab.dataset.view);return;}
     const go=e.target.closest('[data-go-view]'); if(go){navigate(go.dataset.goView);return;}
     const score=e.target.closest('[data-score]'); if(score){const [a,b]=score.dataset.score.split(':');els.scoreA.value=a;els.scoreB.value=b;updatePreview();return;}
-    if(e.target.id==='loginBtn'||e.target.id==='bannerLoginBtn'){openAuth();return;}
+    if(e.target.id==='bannerLoginBtn'){openAuth('login');return;}
+    if(e.target.id==='bannerSignupBtn'){openAuth('signup');return;}
     if(e.target.id==='bannerProfileBtn'){openProfile();return;}
     const confirmBtn=e.target.closest('[data-confirm-match]'); if(confirmBtn){await confirmMatch(confirmBtn.dataset.confirmMatch);return;}
     const rejectBtn=e.target.closest('[data-reject-match]'); if(rejectBtn){await rejectMatch(rejectBtn.dataset.rejectMatch);return;}
     const cancelBtn=e.target.closest('[data-cancel-match]'); if(cancelBtn){await cancelMatch(cancelBtn.dataset.cancelMatch);return;}
     const banBtn=e.target.closest('[data-ban-user]'); if(banBtn){await toggleBan(banBtn.dataset.banUser);return;}
+    const deleteBtn=e.target.closest('[data-delete-user]'); if(deleteBtn){await deleteUser(deleteBtn.dataset.deleteUser);return;}
     if(e.target.id==='refreshAuditBtn'){loadAuditLogs();return;}
   });
   document.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>switchAuthTab(btn.dataset.authTab)));
-  els.loginBtn.addEventListener('click',openAuth);
+  // 登录/注册按钮通过 updateAuthUi() 设置 onclick；这里不要再绑定 openAuth，否则登录后点击“我的账号”会同时弹出认证弹窗。
   els.authClose.addEventListener('click',closeAuth);
   els.authBackdrop.addEventListener('click',e=>{if(e.target===els.authBackdrop)closeAuth();});
   els.loginForm.addEventListener('submit',async e=>{e.preventDefault();try{await signIn();}catch(err){showToast(err.message||'登录失败。','error');}});
