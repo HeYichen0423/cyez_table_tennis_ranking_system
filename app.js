@@ -1,3 +1,4 @@
+/* CYEZ PASSWORD MANAGEMENT LOGIC v2 */
 /* CYEZ乒乓球积分系统：Supabase 实时版 */
 const { createClient } = window.supabase;
 
@@ -88,7 +89,17 @@ const els = {
   profileForm: $('profileForm'),
   profileRealName: $('profileRealName'),
   profileUsername: $('profileUsername'),
-  logoutBtn: $('logoutBtn')
+  logoutBtn: $('logoutBtn'),
+  passwordForm: $('passwordForm'),
+  profileCurrentPassword: $('profileCurrentPassword'),
+  profileNewPassword: $('profileNewPassword'),
+  profileConfirmPassword: $('profileConfirmPassword'),
+  adminResetBackdrop: $('adminResetBackdrop'),
+  adminResetClose: $('adminResetClose'),
+  adminResetSummary: $('adminResetSummary'),
+  adminResetForm: $('adminResetForm'),
+  adminResetPassword: $('adminResetPassword'),
+  generateTempPasswordBtn: $('generateTempPasswordBtn')
 };
 
 function esc(v='') {
@@ -325,7 +336,7 @@ function renderAdmin() {
       <div class="stat-card"><div class="stat-label">封禁账号</div><div class="stat-value">${state.profiles.filter(p=>p.is_banned).length}</div></div>
     </div>
     <div class="card"><div class="card-head"><div><h2>待处理比赛</h2><span class="muted">副管理员和管理员可以审核；参赛对手可以确认。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>提交时间</th><th>比赛</th><th>比分</th><th>级别</th><th>提交人</th><th>操作</th></tr></thead><tbody>${pending.map(m=>`<tr><td>${formatDate(m.created_at)}</td><td class="name-cell">${esc(playerLabel(m.player_a_id))} vs ${esc(playerLabel(m.player_b_id))}</td><td><strong>${m.score_a}:${m.score_b}</strong></td><td>${esc(competition(m.competition_id).name)}</td><td>${esc(playerLabel(m.submitted_by))}</td><td>${matchActionHtml(m)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">没有待处理比赛。</div></td></tr>'}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以封禁账号、添加/取消副管理员。没有已生效比赛的账号可以永久删除；未生效、已拒绝或已撤销的关联记录会在删除账号时一并清理。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以封禁账号、添加/取消副管理员、为用户设置新的临时密码。系统不会显示用户现有密码。没有已生效比赛的账号可以永久删除；未生效、已拒绝或已撤销的关联记录会在删除账号时一并清理。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
     ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更和比赛审核/撤销会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
   `;
   if (isAdmin()) loadAuditLogs();
@@ -555,6 +566,83 @@ async function deleteUser(userId) {
   }
 }
 
+function generateTempPassword(length=12) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const array = new Uint32Array(length);
+  crypto.getRandomValues(array);
+  let out='';
+  for (let i=0;i<length;i++) out += alphabet[array[i] % alphabet.length];
+  return out;
+}
+
+function openAdminResetPassword(userId) {
+  if (!isAdmin()) return;
+  const p=profile(userId);
+  if (!p || userId===currentUser?.id || p.role==='admin') {
+    showToast('出于安全考虑，不能重置其他 admin 或当前登录账号的密码。','error');
+    return;
+  }
+  els.adminResetSummary.innerHTML=`<div><span>真实姓名</span><strong>${esc(p.real_name)}</strong></div><div><span>用户名</span><strong>@${esc(p.username)}</strong></div>`;
+  els.adminResetForm.dataset.targetUserId=userId;
+  els.adminResetPassword.value=generateTempPassword();
+  els.adminResetBackdrop.hidden=false;
+  setTimeout(()=>els.adminResetPassword.select(),30);
+}
+
+function closeAdminResetPassword() {
+  els.adminResetBackdrop.hidden=true;
+  els.adminResetForm.reset();
+}
+
+async function adminResetPassword(e) {
+  e.preventDefault();
+  if (!isAdmin()) return;
+  const targetUserId = els.adminResetForm.dataset.targetUserId;
+  if (!targetUserId) {
+    showToast('没有选择需要重置密码的用户。','error');
+    return;
+  }
+  const password = els.adminResetPassword.value;
+  if (password.length < 8) {
+    showToast('临时密码至少 8 位。','error');
+    return;
+  }
+  try {
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError) throw sessionError;
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error('登录状态已失效，请重新登录。');
+    const { data, error } = await supabaseClient.functions.invoke('admin-reset-password', {
+      body: { target_user_id: targetUserId, password }
+    });
+    if (error) throw error;
+    if (!data?.success) throw new Error(data?.error || '密码重置失败。');
+    closeAdminResetPassword();
+    showToast(`已为 ${playerLabel(targetUserId)} 设置新的临时密码。请安全地转交给用户，并让其登录后立即修改。`);
+  } catch(e) {
+    showToast(e.message || '管理员重置密码失败。请确认 Edge Function 已部署。','error');
+  }
+}
+
+async function changeOwnPassword(e) {
+  e.preventDefault();
+  try {
+    if (!currentUser || !currentProfile || currentProfile.is_banned) throw new Error('请先登录且账号不能处于封禁状态。');
+    const currentPassword=els.profileCurrentPassword.value;
+    const newPassword=els.profileNewPassword.value;
+    const confirmPassword=els.profileConfirmPassword.value;
+    if (newPassword.length < 8) throw new Error('新密码至少 8 位。');
+    if (newPassword !== confirmPassword) throw new Error('两次输入的新密码不一致。');
+    if (newPassword === currentPassword) throw new Error('新密码不能与当前密码相同。');
+    const { error } = await supabaseClient.auth.updateUser({ password:newPassword, current_password:currentPassword });
+    if (error) throw error;
+    els.passwordForm.reset();
+    showToast('密码修改成功。请使用新密码登录。');
+  } catch(e) {
+    showToast(e.message || '密码修改失败。','error');
+  }
+}
+
 async function saveProfile(e) {
   e.preventDefault();
   try {
@@ -608,6 +696,7 @@ function bindEvents() {
     const deleteMatchBtn=e.target.closest('[data-delete-match]'); if(deleteMatchBtn){await deleteMatch(deleteMatchBtn.dataset.deleteMatch);return;}
     const banBtn=e.target.closest('[data-ban-user]'); if(banBtn){await toggleBan(banBtn.dataset.banUser);return;}
     const deleteBtn=e.target.closest('[data-delete-user]'); if(deleteBtn){await deleteUser(deleteBtn.dataset.deleteUser);return;}
+    const resetPwdBtn=e.target.closest('[data-reset-password]'); if(resetPwdBtn){openAdminResetPassword(resetPwdBtn.dataset.resetPassword);return;}
     if(e.target.id==='refreshAuditBtn'){loadAuditLogs();return;}
   });
   document.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>switchAuthTab(btn.dataset.authTab)));
@@ -619,7 +708,12 @@ function bindEvents() {
   els.profileClose.addEventListener('click',closeProfile);
   els.profileBackdrop.addEventListener('click',e=>{if(e.target===els.profileBackdrop)closeProfile();});
   els.profileForm.addEventListener('submit',saveProfile);
+  els.passwordForm.addEventListener('submit',changeOwnPassword);
   els.logoutBtn.addEventListener('click',signOut);
+  els.adminResetClose.addEventListener('click',closeAdminResetPassword);
+  els.adminResetBackdrop.addEventListener('click',e=>{if(e.target===els.adminResetBackdrop)closeAdminResetPassword();});
+  els.adminResetForm.addEventListener('submit',adminResetPassword);
+  els.generateTempPasswordBtn.addEventListener('click',()=>{els.adminResetPassword.value=generateTempPassword(); els.adminResetPassword.select();});
   els.matchForm.addEventListener('submit',submitMatch);
   els.matchForm.addEventListener('reset',()=>setTimeout(()=>{setDefaultDate();updateRatingsInForm();updatePreview();},0));
   [els.playerA,els.playerB,els.scoreA,els.scoreB,els.competitionType].forEach(el=>el.addEventListener('input',updatePreview));
