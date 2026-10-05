@@ -740,12 +740,39 @@ async function changeOwnPassword(e) {
 async function saveProfile(e) {
   e.preventDefault();
   try {
-    const name=els.profileRealName.value.trim();
-    if(!name) throw new Error('姓名不能为空。');
-    const {error}=await supabaseClient.from('profiles').update({real_name:name}).eq('id',currentUser.id);
-    if(error)throw error;
-    await fetchCurrentProfile(); closeProfile(); await refreshData(); showToast('账号资料已保存。');
-  } catch(e){showToast(e.message||'保存失败。','error');}
+    if (!currentUser || !currentProfile) throw new Error('请先登录。');
+    if (currentProfile.is_banned) throw new Error('封禁账号不能修改账号资料。');
+
+    const name = els.profileRealName.value.trim();
+    const username = els.profileUsername.value.trim().toLowerCase();
+    if (!name) throw new Error('姓名不能为空。');
+    if (!/^[a-z0-9_.-]{3,24}$/.test(username)) {
+      throw new Error('用户名需为 3-24 位小写字母、数字、下划线、点或短横线。');
+    }
+
+    const { data, error } = await supabaseClient.functions.invoke('change-own-username', {
+      body: { real_name: name, username }
+    });
+    if (error) {
+      let detail = error.message || '资料保存失败。';
+      try {
+        if (error.context && typeof error.context.json === 'function') {
+          const payload = await error.context.json();
+          if (payload?.error) detail = payload.error;
+        }
+      } catch (_) {}
+      throw new Error(detail);
+    }
+    if (data?.error) throw new Error(data.error);
+
+    await fetchCurrentProfile();
+    closeProfile();
+    await refreshData();
+    updateAuthUi();
+    showToast(data?.message || '账号资料已保存。');
+  } catch(e) {
+    showToast(e.message || '保存失败。','error');
+  }
 }
 
 function setupRealtime() {
