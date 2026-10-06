@@ -26,6 +26,7 @@
     <button class="nav-tab" data-view="ranking">排行榜</button>
     <button class="nav-tab" data-view="history">历史记录</button>
     <button class="nav-tab" data-view="headtohead">个人交战</button>
+    <button class="nav-tab" data-view="notifications">通知 <span id="notificationBadge" class="nav-badge" hidden></span></button>
     <button class="nav-tab" data-view="rules">规则说明</button>
     <button class="nav-tab" data-view="tournaments">赛事</button>
     <button class="nav-tab staff-only" data-view="admin" hidden>管理后台</button>
@@ -105,10 +106,15 @@
       <div id="h2hContent"></div>
     </section>
 
+    <section class="view" id="view-notifications">
+      <div class="page-header"><div><div class="eyebrow">INBOX</div><h1>通知</h1><p>比赛确认、账号状态和系统通知会显示在这里。</p></div><button class="btn btn-ghost" id="markAllNotificationsBtn">全部标为已读</button></div>
+      <div class="card"><div id="notificationsList" class="notifications-list"><div class="empty">登录后查看通知。</div></div></div>
+    </section>
+
     <section class="view" id="view-rules">
       <div class="page-header"><div><div class="eyebrow">RULES</div><h1>积分规则</h1><p>系统采用 Elo 预期胜率 + 比分权重 + 比赛规模权重，并保持单场零和。</p></div></div>
       <div class="rules-grid">
-        <div class="card"><h2>1. 初始积分</h2><p>所有新选手默认 <strong>1500 分</strong>。</p><div class="formula">R<sub>new</sub> = 1500</div></div>
+        <div class="card"><h2>1. 初始积分</h2><p>所有新选手默认 <strong>1500 分</strong>；管理员可在选手开始比赛前设置一次个性化初始积分。</p><div class="formula">R<sub>new</sub> = 初始积分（默认 1500）</div></div>
         <div class="card"><h2>2. 预期胜率</h2><p>先根据赛前积分差判断比赛结果是否符合预期。</p><div class="formula">E = 1 / (1 + 10<sup>(R<sub>对手</sub>−R<sub>自己</sub>)/400</sup>)</div></div>
         <div class="card"><h2>3. 比分系数 M</h2><p>比分越悬殊，M 越高；4:3、3:2 等胶着比分的 M 较低。</p><div class="formula small-formula">M = min(1.50, 0.70 + 0.80 × ((W−L)/(W+L))<sup>0.65</sup> × (ln(1+W+L)/ln5)<sup>0.35</sup>)</div></div>
         <div class="card"><h2>4. 最终积分变化</h2><p>胜者和负者使用完全相反的变化值。</p><div class="formula">ΔR = 32 × C × M × (1 − E)</div></div>
@@ -180,7 +186,7 @@
         <div class="field"><label for="signupRealName">真实姓名</label><input id="signupRealName" autocomplete="name" required maxlength="40" placeholder="将显示在排行榜和比赛记录中"></div>
         <div class="field"><label for="signupUsername">用户名</label><input id="signupUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required placeholder="3-24位字母、数字、下划线、点或短横线"></div>
         <div class="field"><label for="signupPassword">密码</label><input id="signupPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="至少 8 位"></div>
-        <div class="auth-note">注册后即可登录。真实姓名会公开显示在积分系统中；用户名之后可以在“我的账号”中修改。</div>
+        <div class="auth-note">注册仅限学校学生大名单中的姓名。系统会在服务器端核对“学生姓名”；真实姓名会公开显示在积分系统中。用户名之后可以在“我的账号”中修改。</div>
         <button class="btn btn-primary btn-lg full-width" type="submit">注册并登录</button>
       </form>
     </div>
