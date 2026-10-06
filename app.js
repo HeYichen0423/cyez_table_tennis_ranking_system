@@ -396,10 +396,11 @@ function matchActionHtml(m) {
   if (!currentUser) return '';
   const mySide = m.player_a_id === currentUser.id || m.player_b_id === currentUser.id;
   const isOpponent = m.status==='pending_opponent' && mySide && m.submitted_by !== currentUser.id;
+  // 管理员/副管理员可以直接确认，无需等待对手上线。
+  if (isStaff() && m.status==='pending_opponent') return `<button class="text-btn" data-approve-match="${m.id}">直接同意</button> <button class="text-btn danger-text" data-reject-match="${m.id}">拒绝</button>`;
   if (isOpponent && !currentProfile?.is_banned) return `<button class="text-btn" data-confirm-match="${m.id}">确认</button> <button class="text-btn danger-text" data-reject-match="${m.id}">拒绝</button>`;
   if (isStaff() && m.status==='approved') return `<button class="text-btn danger-text" data-cancel-match="${m.id}">撤销</button>`;
   if (isStaff() && (m.status==='rejected' || m.status==='cancelled')) return `<button class="text-btn danger-text" data-delete-match="${m.id}">彻底删除</button>`;
-  if (isStaff() && m.status==='pending_opponent') return `<button class="text-btn danger-text" data-reject-match="${m.id}">拒绝</button>`;
   return '';
 }
 function deltaForMatch(m, playerId) {
@@ -703,6 +704,17 @@ async function confirmMatch(id) {
   try { await updateMatchStatus(id,'approved'); await refreshData(); showToast('比赛已确认并计入排行榜。'); }
   catch(e){showToast(e.message || '确认失败。','error');}
 }
+async function staffApproveMatch(id) {
+  const m=state.matches.find(x=>x.id===id);
+  if (!m || m.status!=='pending_opponent') return;
+  if (!confirm(`确定由管理员直接同意这场比赛吗？\n\n${playerLabel(m.player_a_id)} ${m.score_a}:${m.score_b} ${playerLabel(m.player_b_id)}\n\n同意后会立即计入排行榜。`)) return;
+  try {
+    const {error}=await supabaseClient.rpc('staff_approve_match',{target_match_id:id});
+    if(error) throw error;
+    await refreshData();
+    showToast('管理员已直接同意比赛并计入排行榜。');
+  } catch(e) { showToast(e.message || '直接同意失败，请检查 Supabase 是否部署了相关函数。','error'); }
+}
 async function rejectMatch(id) {
   try { await updateMatchStatus(id,'rejected'); await refreshData(); showToast('比赛已拒绝。'); }
   catch(e){showToast(e.message || '操作失败。','error');}
@@ -958,6 +970,7 @@ function bindEvents() {
     if(e.target.id==='bannerLoginBtn'){openAuth('login');return;}
     if(e.target.id==='bannerSignupBtn'){openAuth('signup');return;}
     if(e.target.id==='bannerProfileBtn'){openProfile();return;}
+    const approveBtn=e.target.closest('[data-approve-match]'); if(approveBtn){await staffApproveMatch(approveBtn.dataset.approveMatch);return;}
     const confirmBtn=e.target.closest('[data-confirm-match]'); if(confirmBtn){await confirmMatch(confirmBtn.dataset.confirmMatch);return;}
     const rejectBtn=e.target.closest('[data-reject-match]'); if(rejectBtn){await rejectMatch(rejectBtn.dataset.rejectMatch);return;}
     const cancelBtn=e.target.closest('[data-cancel-match]'); if(cancelBtn){await cancelMatch(cancelBtn.dataset.cancelMatch);return;}
