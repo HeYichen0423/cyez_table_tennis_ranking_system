@@ -41,7 +41,8 @@ const state = {
   games: new Map(),
   wins: new Map(),
   losses: new Map(),
-  approvedMatches: []
+  approvedMatches: [],
+  notifications: []
 };
 let currentUser = null;
 let currentProfile = null;
@@ -116,7 +117,12 @@ const els = {
   adminResetSummary: $('adminResetSummary'),
   adminResetForm: $('adminResetForm'),
   adminResetPassword: $('adminResetPassword'),
-  generateTempPasswordBtn: $('generateTempPasswordBtn')
+  generateTempPasswordBtn: $('generateTempPasswordBtn'),
+  notificationBadge: $('notificationBadge'),
+  notificationsList: $('notificationsList'),
+  markAllNotificationsBtn: $('markAllNotificationsBtn'),
+  rosterFile: $('rosterFile'),
+  rosterImportStatus: $('rosterImportStatus')
 };
 
 function esc(v='') {
@@ -169,7 +175,7 @@ function sortMatches(ms) {
 }
 
 function rebuildRatings() {
-  state.ratings = new Map(state.profiles.map(p => [p.id, INITIAL_RATING]));
+  state.ratings = new Map(state.profiles.map(p => [p.id, Number(p.initial_rating ?? INITIAL_RATING)]));
   state.games = new Map(state.profiles.map(p => [p.id, 0]));
   state.wins = new Map(state.profiles.map(p => [p.id, 0]));
   state.losses = new Map(state.profiles.map(p => [p.id, 0]));
@@ -276,6 +282,72 @@ function updatePreview() {
   els.matchPreview.innerHTML = `<div class="preview-main"><div class="preview-side"><div class="preview-name">${esc(a.real_name)}</div><div class="preview-rating">赛前 ${formatRating(aR)}</div></div><div class="delta ${aDelta >= 0 ? 'positive' : 'negative'}">${aDelta>=0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-vs">${sa}:${sb}</div><div class="delta ${aDelta >= 0 ? 'negative' : 'positive'}">${aDelta<0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-side"><div class="preview-name">${esc(b.real_name)}</div><div class="preview-rating">赛前 ${formatRating(bR)}</div></div></div><div class="preview-footer">胜者：<strong>${esc(winner.real_name)}</strong> · 负者：${esc(loser.real_name)} · 仅确认后计入积分</div>`;
 }
 
+function unreadNotificationCount() {
+  return state.notifications.filter(n => !n.read_at).length;
+}
+
+function renderNotificationBadge() {
+  const count = unreadNotificationCount();
+  if (els.notificationBadge) {
+    els.notificationBadge.textContent = count ? (count > 99 ? '99+' : String(count)) : '';
+    els.notificationBadge.hidden = count === 0;
+  }
+  document.querySelectorAll('[data-notification-badge]').forEach(el => {
+    el.textContent = count ? (count > 99 ? '99+' : String(count)) : '';
+    el.hidden = count === 0;
+  });
+}
+
+function renderNotifications() {
+  if (!els.notificationsList) return;
+  const items = [...state.notifications].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  els.notificationsList.innerHTML = items.map(n => {
+    const unread = !n.read_at;
+    const safeBody = esc(n.body || '');
+    const action = n.match_id ? `<button class="text-btn" data-notification-match="${esc(n.match_id)}">查看比赛</button>` : '';
+    return `<div class="notification-item ${unread?'unread':''}" data-notification-row="${n.id}">
+      <div class="notification-dot"></div>
+      <div class="notification-main"><div class="notification-title">${esc(n.title||'通知')}</div><div class="notification-body">${safeBody}</div><div class="notification-time">${formatDateLong(n.created_at)}</div></div>
+      <div class="notification-actions">${action}${unread?`<button class="text-btn" data-notification-read="${n.id}">标为已读</button>`:''}</div>
+    </div>`;
+  }).join('') || '<div class="empty">暂无通知。</div>';
+  renderNotificationBadge();
+}
+
+async function loadNotifications() {
+  if (!supabaseClient || !currentUser) { state.notifications=[]; renderNotifications(); return; }
+  const { data, error } = await supabaseClient.from('notifications').select('id,type,title,body,match_id,tournament_id,read_at,created_at').eq('recipient_id',currentUser.id).order('created_at',{ascending:false}).limit(100);
+  if (error) {
+    // 在数据库迁移完成前兼容旧站点；迁移完成后这里应正常读取。
+    if (String(error.code||'')==='PGRST205' || /notifications/i.test(error.message||'')) { state.notifications=[]; renderNotifications(); return; }
+    throw error;
+  }
+  state.notifications=data||[];
+  renderNotifications();
+  if (currentProfile) renderAccountBanner();
+}
+
+async function markNotificationRead(id) {
+  if (!currentUser) return;
+  try {
+    const { error } = await supabaseClient.from('notifications').update({read_at: nowISO()}).eq('id',id).eq('recipient_id',currentUser.id);
+    if (error) throw error;
+    const n=state.notifications.find(x=>x.id===id); if(n)n.read_at=nowISO();
+    renderNotifications();
+  } catch(e){showToast(e.message||'通知更新失败。','error');}
+}
+
+async function markAllNotificationsRead() {
+  if (!currentUser) return;
+  try {
+    const { error } = await supabaseClient.from('notifications').update({read_at: nowISO()}).eq('recipient_id',currentUser.id).is('read_at', null);
+    if (error) throw error;
+    state.notifications.forEach(n=>{if(!n.read_at)n.read_at=nowISO();});
+    renderNotifications();
+    showToast('已全部标为已读。');
+  } catch(e){showToast(e.message||'操作失败。','error');}
+}
+
 function renderDashboard() {
   const rows = rankingRows();
   const activeCount = state.profiles.filter(p => !p.is_banned).length;
@@ -285,7 +357,7 @@ function renderDashboard() {
   els.dashboardStats.innerHTML = `
     <div class="stat-card"><div class="stat-label">在册选手</div><div class="stat-value">${activeCount}</div><div class="stat-note">封禁账号：${state.profiles.filter(p=>p.is_banned).length}</div></div>
     <div class="stat-card"><div class="stat-label">已生效比赛</div><div class="stat-value">${approvedCount}</div><div class="stat-note">所有生效比赛实时同步</div></div>
-    <div class="stat-card"><div class="stat-label">当前平均积分</div><div class="stat-value">${formatRating(avg)}</div><div class="stat-note">理论上始终保持 1500</div></div>
+    <div class="stat-card"><div class="stat-label">当前平均积分</div><div class="stat-value">${formatRating(avg)}</div><div class="stat-note">默认平均 1500；管理员可在开赛前设置初始积分</div></div>
     <div class="stat-card"><div class="stat-label">待我确认</div><div class="stat-value">${currentProfile ? pendingCount : '—'}</div><div class="stat-note">登录后可直接处理</div></div>`;
   els.dashboardRankingBody.innerHTML = rows.slice(0,8).map((r,i)=>`<tr><td><span class="rank-chip">${i+1}</span></td><td class="name-cell">${esc(r.real_name)} ${r.is_banned?'<span class="pill off">封禁</span>':''}</td><td class="rating-number">${formatRating(r.rating)}</td><td>${r.games}</td><td>${formatPct(r.winRate)}</td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">还没有选手。</div></td></tr>';
   const ms = [...state.matches].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,6);
@@ -353,6 +425,70 @@ function renderH2H() {
   els.h2hContent.innerHTML=`<div class="h2h-summary"><div class="h2h-stat"><span>${esc(a.real_name)} 胜场</span><strong>${aw}</strong></div><div class="h2h-stat"><span>${esc(b.real_name)} 胜场</span><strong>${bw}</strong></div><div class="h2h-stat"><span>总交手</span><strong>${ms.length}</strong></div><div class="h2h-stat"><span>${esc(a.real_name)} 累计净变动</span><strong class="${ad>=0?'positive':'negative'}">${ad>=0?'+':'−'}${formatRating(Math.abs(ad))}</strong></div><div class="h2h-stat"><span>${esc(b.real_name)} 累计净变动</span><strong class="${bd>=0?'positive':'negative'}">${bd>=0?'+':'−'}${formatRating(Math.abs(bd))}</strong></div></div><div class="card"><div class="card-head"><div><div class="h2h-title">${esc(a.real_name)} vs ${esc(b.real_name)}</div><span class="muted">仅统计已生效比赛</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>比分</th><th>胜者</th><th>比赛类型</th><th>${esc(a.real_name)} 积分变化</th></tr></thead><tbody>${ms.map(m=>{const winner=profile(m._winnerId);const d=deltaForMatch(m,a.id)||0;return `<tr><td>${formatDateLong(m.played_at)}</td><td><strong>${m.player_a_id===a.id?m.score_a:m.score_b}:${m.player_a_id===a.id?m.score_b:m.score_a}</strong></td><td>${esc(winner?.real_name||'未知')}</td><td>${esc(competition(m.competition_id).name)}</td><td class="${d>=0?'positive':'negative'}">${d>=0?'+':'−'}${formatRating(Math.abs(d))}</td></tr>`;}).join('')||'<tr><td colspan="5"><div class="empty">两人还没有交手记录。</div></td></tr>'}</tbody></table></div></div>`;
 }
 
+async function saveInitialRating(userId) {
+  if (!isAdmin()) return;
+  const p=profile(userId);
+  const input=document.querySelector(`[data-initial-rating=\"${userId}\"]`);
+  const rating=Number(input?.value);
+  if (!p || !Number.isFinite(rating)) { showToast('请输入有效的初始积分。','error'); return; }
+  if (rating < 500 || rating > 2500) { showToast('初始积分建议在 500–2500 之间。','error'); return; }
+  const games=state.approvedMatches.filter(m=>m.player_a_id===userId||m.player_b_id===userId).length;
+  if (games>0) { showToast('该选手已有生效比赛，初始积分已经锁定，不能再修改。','error'); return; }
+  try {
+    const {error}=await supabaseClient.rpc('admin_set_initial_rating',{p_user_id:userId,p_initial_rating:rating});
+    if(error)throw error;
+    await refreshData();
+    showToast(`已将 ${p.real_name} 的初始积分设为 ${rating.toFixed(1)}。`);
+  } catch(e){showToast(e.message||'初始积分修改失败。','error');}
+}
+
+async function ensureXlsxLoaded() {
+  if (window.XLSX) return;
+  await new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-cyez-xlsx]');
+    if (existing) { existing.addEventListener('load', resolve, {once:true}); existing.addEventListener('error', reject, {once:true}); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    script.async = true;
+    script.dataset.cyezXlsx = '1';
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('学生名单解析组件加载失败，请检查网络后重试。'));
+    document.head.appendChild(script);
+  });
+}
+
+async function importStudentRoster(file) {
+  if (!isAdmin()) return;
+  if (!file) return;
+  try {
+    await ensureXlsxLoaded();
+    if (!/\.xlsx$/i.test(file.name)) throw new Error('请上传名为 student_info.xlsx 的 Excel 文件。');
+    if (file.name !== 'student_info.xlsx') throw new Error('请上传文件名为 student_info.xlsx 的大名单。');
+    els.rosterImportStatus.textContent='正在读取 student_info.xlsx…';
+    const buf=await file.arrayBuffer();
+    const wb=window.XLSX.read(buf,{type:'array'});
+    const sheet=wb.Sheets[wb.SheetNames[0]];
+    const rows=window.XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});
+    const headerIndex=rows.findIndex(r=>r.some(cell=>String(cell).trim()==='学生姓名'));
+    if(headerIndex<0) throw new Error('没有找到“学生姓名”表头，请检查文件。');
+    const colIndex=rows[headerIndex].findIndex(cell=>String(cell).trim()==='学生姓名');
+    const names=[];
+    for(let i=headerIndex+1;i<rows.length;i++){
+      const name=String(rows[i]?.[colIndex]??'').trim().replace(/\s+/g,' ');
+      if(name) names.push(name);
+    }
+    if(!names.length) throw new Error('“学生姓名”列没有可用数据。');
+    const {data,error}=await supabaseClient.rpc('admin_import_school_roster',{p_names:names});
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    els.rosterImportStatus.textContent=`已导入 ${data?.inserted ?? names.length} 条学生姓名记录。`;
+    showToast(`学校大名单导入成功，共 ${data?.inserted ?? names.length} 条。`);
+  } catch(e){
+    els.rosterImportStatus.textContent='导入失败。';
+    showToast(e.message||'学生大名单导入失败。','error');
+  } finally { if(els.rosterFile)els.rosterFile.value=''; }
+}
+
 function renderAdmin() {
   if (!isStaff()) { els.adminContent.innerHTML='<div class="card empty">你没有访问管理后台的权限。</div>'; return; }
   const pending = state.matches.filter(m=>m.status==='pending_opponent').sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
@@ -365,10 +501,15 @@ function renderAdmin() {
       <div class="stat-card"><div class="stat-label">封禁账号</div><div class="stat-value">${state.profiles.filter(p=>p.is_banned).length}</div></div>
     </div>
     <div class="card"><div class="card-head"><div><h2>待处理比赛</h2><span class="muted">副管理员和管理员可以审核；参赛对手可以确认。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>提交时间</th><th>比赛</th><th>比分</th><th>级别</th><th>提交人</th><th>操作</th></tr></thead><tbody>${pending.map(m=>`<tr><td>${formatDate(m.created_at)}</td><td class="name-cell">${esc(playerLabel(m.player_a_id))} vs ${esc(playerLabel(m.player_b_id))}</td><td><strong>${m.score_a}:${m.score_b}</strong></td><td>${esc(competition(m.competition_id).name)}</td><td>${esc(playerLabel(m.submitted_by))}</td><td>${matchActionHtml(m)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">没有待处理比赛。</div></td></tr>'}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以直接创建账号、封禁账号、添加/取消副管理员、为用户重置密码。新建账号的初始密码固定为 11111111，用户首次登录后必须修改。</span></div><div><button class="btn btn-primary" data-admin-create-user>＋ 直接创建账号</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="7"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以直接创建账号、封禁账号、设置初始积分、添加/取消副管理员、为用户重置密码。初始积分只建议在选手开始比赛前设置。</span></div><div><button class="btn btn-primary" data-admin-create-user>＋ 直接创建账号</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>当前积分</th><th>初始积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;const games=state.games.get(p.id)||0;const canSet=isAdmin()&&!self&&games===0&&!p.is_banned;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td>${isAdmin()&&!self?`<div class="inline-edit"><input class="initial-rating-input" data-initial-rating="${p.id}" type="number" min="500" max="2500" step="0.1" value="${Number(p.initial_rating??INITIAL_RATING).toFixed(1)}" ${canSet?'':'disabled'}><button class="text-btn" data-save-initial-rating="${p.id}" ${canSet?'':'disabled'}>保存</button></div>${games>0?'<div class="muted">已有生效比赛，已锁定</div>':''}`:formatRating(p.initial_rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="8"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>学校学生大名单</h2><span class="muted">上传 student_info.xlsx，仅管理员可导入；名单不会展示给普通用户。注册时由服务器核对“学生姓名”。</span></div></div><div class="roster-import"><input id="rosterFile" type="file" accept=".xlsx" /><div id="rosterImportStatus" class="muted">请选择 student_info.xlsx。</div></div></div>`:''}
     ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更和比赛审核/撤销会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
   `;
-  if (isAdmin()) loadAuditLogs();
+  if (isAdmin()) {
+    els.rosterFile = $('rosterFile');
+    els.rosterImportStatus = $('rosterImportStatus');
+    loadAuditLogs();
+  }
 }
 
 async function loadAuditLogs() {
@@ -392,9 +533,11 @@ function updateAuthUi() {
     els.loginBtn.textContent = `${currentProfile.real_name} · 我的账号`;
     els.loginBtn.className = 'btn btn-ghost user-button';
     els.loginBtn.onclick = openProfile;
+    els.loginBtn.innerHTML = `${esc(currentProfile.real_name)} · 我的账号${unreadNotificationCount() ? '<span class=\"account-red-dot\"></span>' : ''}`;
     els.signupBtn.hidden = true;
     els.signupBtn.onclick = null;
   }
+  renderNotificationBadge();
   const canWrite = currentProfile && !currentProfile.is_banned;
   els.matchEditor.hidden = !canWrite;
   els.matchAuthNotice.hidden = !!canWrite;
@@ -411,6 +554,7 @@ function navigate(view) {
   if (view==='history') renderHistory();
   if (view==='headtohead') renderH2H();
   if (view==='admin') renderAdmin();
+  if (view==='notifications') renderNotifications();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
@@ -463,14 +607,17 @@ async function signUp() {
   if (!realName) throw new Error('请输入真实姓名。');
   if (!/^[a-z0-9_.-]{3,24}$/.test(username)) throw new Error('用户名需为 3-24 位小写字母、数字、下划线、点或短横线。');
   if (password.length<8) throw new Error('密码至少 8 位。');
-  const { data: exists, error: existsError } = await supabaseClient.from('profiles').select('id').eq('username',username).maybeSingle();
-  if (existsError) throw existsError;
-  if (exists) throw new Error('用户名已被使用，请换一个。');
+  const { data, error } = await supabaseClient.functions.invoke('register-student', { body: { real_name: realName, username, password } });
+  if (error) {
+    let msg=error.message||'注册失败。';
+    try { if(error.context && typeof error.context.json==='function'){const payload=await error.context.json(); if(payload?.error)msg=payload.error;} } catch(_){}
+    throw new Error(msg);
+  }
+  if (!data?.success) throw new Error(data?.error||'注册失败。');
   const email=`${username}@login.cyez.local`;
-  const { data, error }=await supabaseClient.auth.signUp({email,password,options:{data:{real_name:realName,username}}});
-  if (error) throw error;
-  if (!data.session) throw new Error('注册成功，但当前 Supabase 仍要求邮箱确认。请在 Auth 设置中关闭 Confirm Email 后重试。');
-  closeAuth(); await refreshData(); showToast('感谢注册CYEZ乒乓社积分系统');
+  const {error:loginError}=await supabaseClient.auth.signInWithPassword({email,password});
+  if(loginError) throw new Error('注册成功，但自动登录失败，请使用新用户名和密码登录。');
+  closeAuth(); await loadSession(); await refreshData(); showToast('感谢注册CYEZ乒乓社积分系统');
 }
 
 async function signIn() {
@@ -518,12 +665,12 @@ async function refreshData() {
     return;
   }
   const [{data:profiles,error:pErr},{data:matches,error:mErr}] = await Promise.all([
-    supabaseClient.from('profiles').select('id,real_name,username,role,is_banned,created_at').order('created_at',{ascending:true}),
+    supabaseClient.from('profiles').select('id,real_name,username,role,is_banned,created_at,initial_rating,school_verified').order('created_at',{ascending:true}),
     supabaseClient.from('matches').select('*').order('played_at',{ascending:true})
   ]);
   if (pErr) throw pErr; if (mErr) throw mErr;
   state.profiles=profiles||[]; state.matches=matches||[];
-  rebuildRatings(); refreshSelects(); renderDashboard(); renderRanking(); renderHistory(); renderAdmin(); updateAuthUi();
+  rebuildRatings(); refreshSelects(); renderDashboard(); renderRanking(); renderHistory(); renderAdmin(); updateAuthUi(); await loadNotifications();
 }
 function renderUnconfigured() {
   els.dashboardStats.innerHTML='<div class="config-warning"><strong>网站尚未连接云端数据库。</strong><span>请编辑 <code>supabase-config.js</code> 填入 Supabase URL 和 Publishable / anon key，然后部署到 GitHub Pages。</span></div>';
@@ -798,7 +945,7 @@ async function init() {
       currentUser=session?.user || null;
       await fetchCurrentProfile();
       updateAuthUi();
-      try { await refreshData(); } catch(e) { console.error(e); }
+      try { await refreshData(); await loadNotifications(); } catch(e) { console.error(e); }
     });
   } catch(e) { showToast(e.message||'连接数据库失败。','error'); }
 }
@@ -820,6 +967,10 @@ function bindEvents() {
     const resetPwdBtn=e.target.closest('[data-reset-password]'); if(resetPwdBtn){openAdminResetPassword(resetPwdBtn.dataset.resetPassword);return;}
     const createUserBtn=e.target.closest('[data-admin-create-user]'); if(createUserBtn){openAdminCreateUser();return;}
     if(e.target.id==='refreshAuditBtn'){loadAuditLogs();return;}
+    const saveInitial=e.target.closest('[data-save-initial-rating]'); if(saveInitial){await saveInitialRating(saveInitial.dataset.saveInitialRating);return;}
+    const notifRead=e.target.closest('[data-notification-read]'); if(notifRead){await markNotificationRead(notifRead.dataset.notificationRead);return;}
+    const notifMatch=e.target.closest('[data-notification-match]'); if(notifMatch){await markNotificationRead((state.notifications.find(n=>n.match_id===notifMatch.dataset.notificationMatch)||{}).id); navigate('history'); return;}
+    if(e.target.id==='markAllNotificationsBtn'){await markAllNotificationsRead();return;}
   });
   document.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>switchAuthTab(btn.dataset.authTab)));
   // 登录/注册按钮通过 updateAuthUi() 设置 onclick；这里不要再绑定 openAuth，否则登录后点击“我的账号”会同时弹出认证弹窗。
@@ -849,7 +1000,7 @@ function bindEvents() {
   els.rankingSearch.addEventListener('input',renderRanking);
   els.historyFilter.addEventListener('change',renderHistory);
   els.h2hA.addEventListener('change',renderH2H); els.h2hB.addEventListener('change',renderH2H);
-  document.addEventListener('change',e=>{const role=e.target.closest('[data-role-user]');if(role)updateRole(role.dataset.roleUser,role.value);});
+  document.addEventListener('change',e=>{const role=e.target.closest('[data-role-user]');if(role)updateRole(role.dataset.roleUser,role.value); const rf=e.target.closest('#rosterFile'); if(rf)importStudentRoster(rf.files?.[0]);});
 }
 
 init();
