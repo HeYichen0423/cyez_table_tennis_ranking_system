@@ -44,7 +44,8 @@ const state = {
   approvedMatches: [],
   notifications: [],
   boardPosts: [],
-  boardComments: []
+  boardComments: [],
+  boardTodayCount: 0
 };
 let currentUser = null;
 let currentProfile = null;
@@ -87,6 +88,7 @@ const els = {
   previewM: $('previewM'),
   previewE: $('previewE'),
   rankingSearch: $('rankingSearch'),
+  exportRankingBtn: $('exportRankingBtn'),
   rankingBody: $('rankingBody'),
   historyFilter: $('historyFilter'),
   historyBody: $('historyBody'),
@@ -134,6 +136,8 @@ const els = {
   messageBoardContent: $('messageBoardContent'),
   messageBoardQuota: $('messageBoardQuota'),
   messageBoardLoginHint: $('messageBoardLoginHint'),
+  messageBoardAnonymous: $('messageBoardAnonymous'),
+  messageBoardMentionHint: $('messageBoardMentionHint'),
   messageBoardList: $('messageBoardList'),
   rosterFile: $('rosterFile'),
   rosterImportStatus: $('rosterImportStatus')
@@ -384,7 +388,7 @@ function renderNotifications() {
   els.notificationsList.innerHTML = items.map(n => {
     const unread = !n.read_at;
     const safeBody = esc(n.body || '');
-    const action = n.match_id ? `<button class="text-btn" data-notification-match="${esc(n.match_id)}">查看比赛</button>` : '';
+    const action = n.match_id ? `<button class="text-btn" data-notification-match="${esc(n.match_id)}">查看比赛</button>` : (n.message_post_id ? `<button class="text-btn" data-notification-message="${esc(n.message_post_id)}">查看留言</button>` : '');
     return `<div class="notification-item ${unread?'unread':''}" data-notification-row="${n.id}">
       <div class="notification-dot"></div>
       <div class="notification-main"><div class="notification-title">${esc(n.title||'通知')}</div><div class="notification-body">${safeBody}</div><div class="notification-time">${formatDateLong(n.created_at)}</div></div>
@@ -396,7 +400,11 @@ function renderNotifications() {
 
 async function loadNotifications() {
   if (!supabaseClient || !currentUser) { state.notifications=[]; renderNotifications(); return; }
-  const { data, error } = await supabaseClient.from('notifications').select('id,type,title,body,match_id,tournament_id,read_at,created_at').eq('recipient_id',currentUser.id).order('created_at',{ascending:false}).limit(100);
+  let data, error;
+  ({ data, error } = await supabaseClient.from('notifications').select('id,type,title,body,match_id,tournament_id,message_post_id,read_at,created_at').eq('recipient_id',currentUser.id).order('created_at',{ascending:false}).limit(100));
+  if (error && /message_post_id/i.test(error.message||'')) {
+    ({ data, error } = await supabaseClient.from('notifications').select('id,type,title,body,match_id,tournament_id,read_at,created_at').eq('recipient_id',currentUser.id).order('created_at',{ascending:false}).limit(100));
+  }
   if (error) {
     // 在数据库迁移完成前兼容旧站点；迁移完成后这里应正常读取。
     if (String(error.code||'')==='PGRST205' || /notifications/i.test(error.message||'')) { state.notifications=[]; renderNotifications(); return; }
@@ -429,29 +437,28 @@ async function markAllNotificationsRead() {
 }
 
 function messageBoardDayCount() {
-  if (!currentUser) return 0;
-  const start = new Date(); start.setHours(0,0,0,0);
-  const end = new Date(start); end.setDate(end.getDate()+1);
-  return state.boardPosts.filter(p => p.author_id === currentUser.id && new Date(p.created_at) >= start && new Date(p.created_at) < end).length;
+  return Number.isFinite(Number(state.boardTodayCount)) ? Number(state.boardTodayCount) : 0;
 }
 
 async function loadMessageBoard() {
   if (!supabaseClient) return;
   try { await supabaseClient.rpc('message_board_cleanup'); } catch (_) {}
-  const { data: posts, error: pErr } = await supabaseClient
-    .from('message_board_posts')
-    .select('id,author_id,content,created_at,is_pinned,pinned_at,expires_at,deleted_at')
-    .is('deleted_at', null)
-    .order('is_pinned', {ascending:false})
-    .order('created_at', {ascending:false})
-    .limit(100);
+  let posts = [];
+  const { data: postData, error: pErr } = await supabaseClient.rpc('message_board_list');
   if (pErr) {
     if (String(pErr.code||'') === 'PGRST205' || /message_board/i.test(pErr.message||'')) {
-      state.boardPosts=[]; state.boardComments=[]; renderMessageBoard(); return;
+      state.boardPosts=[]; state.boardComments=[]; state.boardTodayCount=0; renderMessageBoard(); return;
     }
     throw pErr;
   }
-  state.boardPosts = posts || [];
+  posts = postData || [];
+  state.boardPosts = posts;
+  if (currentUser) {
+    const { data: countData, error: countErr } = await supabaseClient.rpc('message_board_today_count');
+    if (!countErr) state.boardTodayCount = Number(countData ?? 0);
+  } else {
+    state.boardTodayCount = 0;
+  }
   const ids = state.boardPosts.map(p=>p.id);
   if (!ids.length) { state.boardComments=[]; renderMessageBoard(); return; }
   const { data: comments, error: cErr } = await supabaseClient
@@ -468,26 +475,31 @@ async function loadMessageBoard() {
 function renderMessageBoard() {
   if (!els.messageBoardList) return;
   const count = messageBoardDayCount();
-  if (els.messageBoardQuota) els.messageBoardQuota.textContent = currentUser ? `今天已发布 ${count}/3 条留言。` : '登录后可留言。';
+  const adminViewer = isAdmin();
+  if (els.messageBoardQuota) {
+    els.messageBoardQuota.textContent = !currentUser ? '登录后可留言。' : adminViewer ? '' : `今天已发布 ${count}/3 条留言。`;
+  }
   if (els.messageBoardForm) els.messageBoardForm.hidden = !currentUser || !!currentProfile?.is_banned;
   if (els.messageBoardLoginHint) els.messageBoardLoginHint.hidden = !!currentUser && !currentProfile?.is_banned;
-  const visible = state.boardPosts.filter(p=>!p.deleted_at && (p.is_pinned || new Date(p.expires_at) > new Date()));
+  const visible = state.boardPosts.filter(p=>!p.deleted_at && (p.is_pinned || !p.expires_at || new Date(p.expires_at) > new Date()));
   if (!visible.length) { els.messageBoardList.innerHTML='<div class="card empty">还没有留言，来留下第一句话吧。</div>'; return; }
   els.messageBoardList.innerHTML = visible.map(post => {
-    const author=profile(post.author_id);
+    const authorName = post.author_real_name || '匿名用户';
+    const authorUsername = post.author_username ? ` · @${esc(post.author_username)}` : '';
     const comments=state.boardComments.filter(c=>c.post_id===post.id);
-    const own=currentUser?.id===post.author_id;
-    const canDelete=own || isStaff();
+    const own=currentUser && post.author_id && currentUser.id===post.author_id;
+    const canDelete=!!post.can_delete || !!own;
     const commentHtml=comments.map(c=>{
-      const ca=profile(c.author_id); const cOwn=currentUser?.id===c.author_id; const cCanDelete=cOwn||isStaff();
-      return `<div class="message-comment"><div><strong>${esc(ca?.real_name||'未知用户')}</strong><span class="muted"> · ${formatDate(c.created_at)}</span></div><div class="message-comment-body">${esc(c.content).replace(/\n/g,'<br>')}</div>${cCanDelete?`<button class="text-btn danger-text" data-delete-board-comment="${c.id}">删除</button>`:''}</div>`;
+      const ca=profile(c.author_id); const cOwn=currentUser?.id===c.author_id; const cCanDelete=cOwn||isAdmin();
+      return `<div class="message-comment"><div><strong>${esc(ca?.real_name||'未知用户')}</strong><span class="muted"> · @${esc(ca?.username||'')} · ${formatDate(c.created_at)}</span></div><div class="message-comment-body">${esc(c.content).replace(/\n/g,'<br>')}</div>${cCanDelete?`<button class="text-btn danger-text" data-delete-board-comment="${c.id}">删除</button>`:''}</div>`;
     }).join('');
+    const anonymousLabel = post.is_anonymous ? (adminViewer ? '<span class="pill">匿名发布</span>' : '') : '';
     return `<article class="card message-post ${post.is_pinned?'pinned':''}">
-      <div class="message-post-head"><div><strong>${esc(author?.real_name||'未知用户')}</strong><span class="muted"> · @${esc(author?.username||'')}</span></div><div class="message-post-meta">${post.is_pinned?'<span class="pill active">置顶</span> ':''}${formatDate(post.created_at)}</div></div>
+      <div class="message-post-head"><div><strong>${esc(authorName)}</strong>${authorUsername} ${anonymousLabel}</div><div class="message-post-meta">${post.is_pinned?'<span class="pill active">置顶</span> ':''}${formatDate(post.created_at)}</div></div>
       <div class="message-post-content">${esc(post.content).replace(/\n/g,'<br>')}</div>
-      <div class="message-post-actions">${canDelete?`<button class="text-btn danger-text" data-delete-board-post="${post.id}">删除</button>`:''}${isStaff()?`<button class="text-btn" data-pin-board-post="${post.id}" data-pin-value="${post.is_pinned?'false':'true'}">${post.is_pinned?'取消置顶':'置顶'}</button>`:''}</div>
+      <div class="message-post-actions">${canDelete?`<button class="text-btn danger-text" data-delete-board-post="${post.id}">删除</button>`:''}${post.can_pin?`<button class="text-btn" data-pin-board-post="${post.id}" data-pin-value="${post.is_pinned?'false':'true'}">${post.is_pinned?'取消置顶':'置顶'}</button>`:''}</div>
       <div class="message-comments">${commentHtml || '<div class="muted small">暂无评论。</div>'}</div>
-      ${currentUser&&!currentProfile?.is_banned?`<form class="message-comment-form" data-comment-form="${post.id}"><input maxlength="500" placeholder="写评论……" required><button class="btn btn-ghost btn-sm" type="submit">评论</button></form>`:''}
+      ${currentUser&&!currentProfile?.is_banned?`<form class="message-comment-form" data-comment-form="${post.id}"><input maxlength="500" placeholder="写评论…… 可用 @用户名 提醒对方" required><button class="btn btn-ghost btn-sm" type="submit">评论</button></form>`:''}
     </article>`;
   }).join('');
 }
@@ -496,10 +508,10 @@ async function submitMessageBoard(e) {
   e.preventDefault();
   try {
     if (!currentUser || !currentProfile || currentProfile.is_banned) throw new Error('请先登录后再留言。');
-    if (messageBoardDayCount() >= 3) throw new Error('你今天已经发布了 3 条留言，请明天再来。');
     const content=els.messageBoardContent.value.trim();
     if (!content) throw new Error('留言不能为空。');
-    const {error}=await supabaseClient.rpc('message_board_create',{p_content:content});
+    const anonymous=!!els.messageBoardAnonymous?.checked;
+    const {error}=await supabaseClient.rpc('message_board_create',{p_content:content,p_anonymous:anonymous});
     if(error) throw error;
     els.messageBoardForm.reset(); await loadMessageBoard(); showToast('留言发布成功。');
   } catch(e) { showToast(e.message||'留言发布失败。','error'); }
@@ -618,6 +630,32 @@ async function saveInitialRating(userId) {
   } catch(e){showToast(e.message||'初始积分修改失败。','error');}
 }
 
+async function exportRanking() {
+  try {
+    await ensureXlsxLoaded();
+    const rows = rankingRows();
+    const data = [
+      ['排名', '真实姓名', '积分'],
+      ...rows.map((r, i) => [i + 1, r.real_name, Number(Number(r.rating).toFixed(1))])
+    ];
+    const ws = window.XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [
+      { wch: 10 },
+      { wch: 18 },
+      { wch: 12 }
+    ];
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, '排行榜');
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    window.XLSX.writeFile(wb, `CYEZ乒乓球排行榜-${y}${m}${day}.xlsx`);
+  } catch (e) {
+    showToast(e.message || '排名导出失败，请稍后重试。', 'error');
+  }
+}
+
 async function ensureXlsxLoaded() {
   if (window.XLSX) return;
   await new Promise((resolve, reject) => {
@@ -628,7 +666,7 @@ async function ensureXlsxLoaded() {
     script.async = true;
     script.dataset.cyezXlsx = '1';
     script.onload = resolve;
-    script.onerror = () => reject(new Error('学生名单解析组件加载失败，请检查网络后重试。'));
+    script.onerror = () => reject(new Error('Excel组件加载失败，请检查网络后重试。'));
     document.head.appendChild(script);
   });
 }
@@ -1136,7 +1174,7 @@ function setupRealtime() {
   realtimeChannel=supabaseClient.channel('cyez-live')
     .on('postgres_changes',{event:'*',schema:'public',table:'profiles'},async()=>{try{await refreshData();}catch(e){console.error(e);}})
     .on('postgres_changes',{event:'*',schema:'public',table:'matches'},async()=>{try{await refreshData();}catch(e){console.error(e);}})
-    .on('postgres_changes',{event:'*',schema:'public',table:'message_board_posts'},async()=>{try{await loadMessageBoard();}catch(e){console.error(e);}})
+    .on('postgres_changes',{event:'*',schema:'public',table:'notifications'},async()=>{try{if(currentUser) await loadNotifications();}catch(e){console.error(e);}})
     .on('postgres_changes',{event:'*',schema:'public',table:'message_board_comments'},async()=>{try{await loadMessageBoard();}catch(e){console.error(e);}})
     .subscribe((status)=>{
       els.liveStatus.innerHTML = status==='SUBSCRIBED' ? '<i></i> 实时同步中' : '<i class="off-dot"></i> 正在连接…';
@@ -1152,6 +1190,7 @@ async function init() {
   setupRealtime();
   supabaseClient.auth.onAuthStateChange(async (_event, session)=>{
     currentUser=session?.user || null;
+    if (!currentUser) state.boardTodayCount = 0;
     try {
       await fetchCurrentProfile();
       updateAuthUi();
@@ -1221,6 +1260,7 @@ function bindEvents() {
     const saveInitial=e.target.closest('[data-save-initial-rating]'); if(saveInitial){await saveInitialRating(saveInitial.dataset.saveInitialRating);return;}
     const notifRead=e.target.closest('[data-notification-read]'); if(notifRead){await markNotificationRead(notifRead.dataset.notificationRead);return;}
     const notifMatch=e.target.closest('[data-notification-match]'); if(notifMatch){await markNotificationRead((state.notifications.find(n=>n.match_id===notifMatch.dataset.notificationMatch)||{}).id); navigate('history'); return;}
+    const notifMessage=e.target.closest('[data-notification-message]'); if(notifMessage){await markNotificationRead((state.notifications.find(n=>n.message_post_id===notifMessage.dataset.notificationMessage)||{}).id); navigate('messageboard'); return;}
     if(e.target.id==='markAllNotificationsBtn'){await markAllNotificationsRead();return;}
     const deleteBoard=e.target.closest('[data-delete-board-post]'); if(deleteBoard){await deleteMessageBoardPost(deleteBoard.dataset.deleteBoardPost);return;}
     const pinBoard=e.target.closest('[data-pin-board-post]'); if(pinBoard){await pinMessageBoardPost(pinBoard.dataset.pinBoardPost,pinBoard.dataset.pinValue==='true');return;}
@@ -1255,6 +1295,7 @@ function bindEvents() {
   els.playerA.addEventListener('change',()=>{updateRatingsInForm();updatePreview();});
   els.playerB.addEventListener('change',()=>{updateRatingsInForm();updatePreview();});
   els.rankingSearch.addEventListener('input',renderRanking);
+  els.exportRankingBtn?.addEventListener('click', exportRanking);
   els.historyFilter.addEventListener('change',renderHistory);
   els.h2hA.addEventListener('change',renderH2H); els.h2hB.addEventListener('change',renderH2H);
   document.addEventListener('change',e=>{const role=e.target.closest('[data-role-user]');if(role)updateRole(role.dataset.roleUser,role.value); const rf=e.target.closest('#rosterFile'); if(rf)importStudentRoster(rf.files?.[0]);});
