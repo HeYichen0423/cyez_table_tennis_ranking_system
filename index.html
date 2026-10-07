@@ -35,6 +35,7 @@
     <button class="nav-tab" data-view="history">历史记录</button>
     <button class="nav-tab" data-view="headtohead">个人交战</button>
     <button class="nav-tab" data-view="notifications">通知 <span id="notificationBadge" class="nav-badge" hidden></span></button>
+    <button class="nav-tab" data-view="messageboard">留言板</button>
     <button class="nav-tab" data-view="rules">规则说明</button>
     <button class="nav-tab" data-view="tournaments">赛事</button>
     <button class="nav-tab staff-only" data-view="admin" hidden>管理后台</button>
@@ -119,6 +120,19 @@
       <div class="card"><div id="notificationsList" class="notifications-list"><div class="empty">登录后查看通知。</div></div></div>
     </section>
 
+    <section class="view" id="view-messageboard">
+      <div class="page-header"><div><div class="eyebrow">MESSAGE BOARD</div><h1>留言板</h1><p>这里可以为网站建设提建议、吐槽比赛、评价对手，也可以畅所欲言；当然也可以当作表白墙（？）。每人每天最多发布 3 条留言。留言默认保留 30 天；管理员置顶后不会因 30 天自动删除。</p></div></div>
+      <div class="card message-board-compose" id="messageBoardCompose">
+        <div class="card-head"><div><h2>发表留言</h2><span class="muted" id="messageBoardQuota">登录后可留言。</span></div></div>
+        <form id="messageBoardForm" class="message-form">
+          <textarea id="messageBoardContent" maxlength="1000" rows="4" placeholder="写点什么吧……" required></textarea>
+          <div class="message-form-actions"><span class="muted">请友善交流，不要发布密码、联系方式等敏感信息。</span><button class="btn btn-primary" type="submit">发布留言</button></div>
+        </form>
+        <div class="empty" id="messageBoardLoginHint">请先登录后再留言。</div>
+      </div>
+      <div id="messageBoardList" class="message-board-list"><div class="empty">正在加载留言板……</div></div>
+    </section>
+
     <section class="view" id="view-rules">
       <div class="page-header"><div><div class="eyebrow">RULES</div><h1>积分规则</h1><p>系统采用 Elo 预期胜率 + 比分权重 + 比赛规模权重，并保持单场零和。</p></div></div>
       <div class="rules-grid">
@@ -201,7 +215,7 @@
   </div>
 
   <div class="modal-backdrop" id="profileBackdrop" hidden>
-    <div class="modal">
+    <div class="modal profile-modal">
       <button class="modal-close" id="profileClose" aria-label="关闭">×</button>
       <h2>我的账号</h2>
       <div id="profileSummary" class="profile-summary"></div>
