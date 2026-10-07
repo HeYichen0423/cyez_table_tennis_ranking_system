@@ -45,7 +45,8 @@ const state = {
   notifications: [],
   boardPosts: [],
   boardComments: [],
-  boardTodayCount: 0
+  boardTodayCount: 0,
+  boardPage: 1
 };
 let currentUser = null;
 let currentProfile = null;
@@ -139,6 +140,7 @@ const els = {
   messageBoardAnonymous: $('messageBoardAnonymous'),
   messageBoardMentionHint: $('messageBoardMentionHint'),
   messageBoardList: $('messageBoardList'),
+  messageBoardPagination: $('messageBoardPagination'),
   rosterFile: $('rosterFile'),
   rosterImportStatus: $('rosterImportStatus')
 };
@@ -476,27 +478,47 @@ function renderMessageBoard() {
   }
   if (els.messageBoardForm) els.messageBoardForm.hidden = !currentUser || !!currentProfile?.is_banned;
   if (els.messageBoardLoginHint) els.messageBoardLoginHint.hidden = !!currentUser && !currentProfile?.is_banned;
-  const visible = state.boardPosts.filter(p=>!p.deleted_at && (p.is_pinned || !p.expires_at || new Date(p.expires_at) > new Date()));
-  if (!visible.length) { els.messageBoardList.innerHTML='<div class="card empty">还没有留言，来留下第一句话吧。</div>'; return; }
-  els.messageBoardList.innerHTML = visible.map(post => {
+
+  const visible = state.boardPosts.filter(p => !p.deleted_at && (p.is_pinned || !p.expires_at || new Date(p.expires_at) > new Date()));
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+  state.boardPage = Math.min(Math.max(Number(state.boardPage) || 1, 1), totalPages);
+  const start = (state.boardPage - 1) * pageSize;
+  const pagePosts = visible.slice(start, start + pageSize);
+
+  if (!visible.length) {
+    els.messageBoardList.innerHTML = '<div class="card empty">还没有留言，来留下第一句话吧。</div>';
+    if (els.messageBoardPagination) els.messageBoardPagination.innerHTML = '';
+    return;
+  }
+
+  els.messageBoardList.innerHTML = pagePosts.map(post => {
     const authorName = post.author_real_name || '匿名用户';
     const authorUsername = post.author_username ? ` · @${esc(post.author_username)}` : '';
-    const comments=state.boardComments.filter(c=>c.post_id===post.id);
-    const own=currentUser && post.author_id && currentUser.id===post.author_id;
-    const canDelete=!!post.can_delete || !!own;
-    const commentHtml=comments.map(c=>{
-      const ca=profile(c.author_id); const cOwn=currentUser?.id===c.author_id; const cCanDelete=cOwn||isAdmin();
-      return `<div class="message-comment"><div><strong>${esc(ca?.real_name||'未知用户')}</strong><span class="muted"> · @${esc(ca?.username||'')} · ${formatDate(c.created_at)}</span></div><div class="message-comment-body">${esc(c.content).replace(/\n/g,'<br>')}</div>${cCanDelete?`<button class="text-btn danger-text" data-delete-board-comment="${c.id}">删除</button>`:''}</div>`;
+    const comments = state.boardComments.filter(c => c.post_id === post.id);
+    const own = currentUser && post.author_id && currentUser.id === post.author_id;
+    const canDelete = !!post.can_delete || !!own;
+    const commentHtml = comments.map(c => {
+      const ca = profile(c.author_id); const cOwn = currentUser?.id === c.author_id; const cCanDelete = cOwn || isAdmin();
+      return `<div class="message-comment"><div><strong>${esc(ca?.real_name || '未知用户')}</strong><span class="muted"> · @${esc(ca?.username || '')} · ${formatDate(c.created_at)}</span></div><div class="message-comment-body">${esc(c.content).replace(/\n/g,'<br>')}</div>${cCanDelete ? `<button class="text-btn danger-text" data-delete-board-comment="${c.id}">删除</button>` : ''}</div>`;
     }).join('');
     const anonymousLabel = post.is_anonymous ? (adminViewer ? '<span class="pill">匿名发布</span>' : '') : '';
-    return `<article class="card message-post ${post.is_pinned?'pinned':''}">
-      <div class="message-post-head"><div><strong>${esc(authorName)}</strong>${authorUsername} ${anonymousLabel}</div><div class="message-post-meta">${post.is_pinned?'<span class="pill active">置顶</span> ':''}${formatDate(post.created_at)}</div></div>
+    return `<article class="card message-post ${post.is_pinned ? 'pinned' : ''}">
+      <div class="message-post-head"><div><strong>${esc(authorName)}</strong>${authorUsername} ${anonymousLabel}</div><div class="message-post-meta">${post.is_pinned ? '<span class="pill active">置顶</span> ' : ''}${formatDate(post.created_at)}</div></div>
       <div class="message-post-content">${esc(post.content).replace(/\n/g,'<br>')}</div>
-      <div class="message-post-actions">${canDelete?`<button class="text-btn danger-text" data-delete-board-post="${post.id}">删除</button>`:''}${post.can_pin?`<button class="text-btn" data-pin-board-post="${post.id}" data-pin-value="${post.is_pinned?'false':'true'}">${post.is_pinned?'取消置顶':'置顶'}</button>`:''}</div>
+      <div class="message-post-actions">${canDelete ? `<button class="text-btn danger-text" data-delete-board-post="${post.id}">删除</button>` : ''}${post.can_pin ? `<button class="text-btn" data-pin-board-post="${post.id}" data-pin-value="${post.is_pinned ? 'false' : 'true'}">${post.is_pinned ? '取消置顶' : '置顶'}</button>` : ''}</div>
       <div class="message-comments">${commentHtml || '<div class="muted small">暂无评论。</div>'}</div>
-      ${currentUser&&!currentProfile?.is_banned?`<form class="message-comment-form" data-comment-form="${post.id}"><input maxlength="500" placeholder="写评论…… 可用 @用户名 提醒对方" required><button class="btn btn-ghost btn-sm" type="submit">评论</button></form>`:''}
+      ${currentUser && !currentProfile?.is_banned ? `<form class="message-comment-form" data-comment-form="${post.id}"><input maxlength="500" placeholder="写评论…… 可用 @用户名 提醒对方" required><button class="btn btn-ghost btn-sm" type="submit">评论</button></form>` : ''}
     </article>`;
   }).join('');
+
+  if (els.messageBoardPagination) {
+    els.messageBoardPagination.innerHTML = totalPages > 1 ? `
+      <button class="btn btn-ghost btn-sm" data-board-page="${state.boardPage - 1}" ${state.boardPage <= 1 ? 'disabled' : ''}>上一页</button>
+      <span class="message-board-page-info">第 ${state.boardPage} / ${totalPages} 页</span>
+      <button class="btn btn-ghost btn-sm" data-board-page="${state.boardPage + 1}" ${state.boardPage >= totalPages ? 'disabled' : ''}>下一页</button>
+    ` : '';
+  }
 }
 
 async function submitMessageBoard(e) {
@@ -508,7 +530,7 @@ async function submitMessageBoard(e) {
     const anonymous=!!els.messageBoardAnonymous?.checked;
     const {error}=await supabaseClient.rpc('message_board_create',{p_content:content,p_anonymous:anonymous});
     if(error) throw error;
-    els.messageBoardForm.reset(); await loadMessageBoard(); showToast('留言发布成功。');
+    els.messageBoardForm.reset(); state.boardPage=1; await loadMessageBoard(); showToast('留言发布成功。');
   } catch(e) { showToast(e.message||'留言发布失败。','error'); }
 }
 async function deleteMessageBoardPost(id) {
@@ -1257,6 +1279,7 @@ function bindEvents() {
     const notifMatch=e.target.closest('[data-notification-match]'); if(notifMatch){await markNotificationRead((state.notifications.find(n=>n.match_id===notifMatch.dataset.notificationMatch)||{}).id); navigate('history'); return;}
     const notifMessage=e.target.closest('[data-notification-message]'); if(notifMessage){await markNotificationRead((state.notifications.find(n=>n.message_post_id===notifMessage.dataset.notificationMessage)||{}).id); navigate('messageboard'); return;}
     if(e.target.id==='markAllNotificationsBtn'){await markAllNotificationsRead();return;}
+    const boardPageBtn=e.target.closest('[data-board-page]'); if(boardPageBtn && !boardPageBtn.disabled){state.boardPage=Number(boardPageBtn.dataset.boardPage)||1; renderMessageBoard(); return;}
     const deleteBoard=e.target.closest('[data-delete-board-post]'); if(deleteBoard){await deleteMessageBoardPost(deleteBoard.dataset.deleteBoardPost);return;}
     const pinBoard=e.target.closest('[data-pin-board-post]'); if(pinBoard){await pinMessageBoardPost(pinBoard.dataset.pinBoardPost,pinBoard.dataset.pinValue==='true');return;}
     const deleteBoardComment=e.target.closest('[data-delete-board-comment]'); if(deleteBoardComment){await deleteMessageBoardComment(deleteBoardComment.dataset.deleteBoardComment);return;}
