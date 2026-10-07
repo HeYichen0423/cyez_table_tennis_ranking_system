@@ -125,7 +125,7 @@
       <div class="card message-board-compose" id="messageBoardCompose">
         <div class="card-head"><div><h2>发表留言</h2><span class="muted" id="messageBoardQuota">登录后可留言。</span></div></div>
         <form id="messageBoardForm" class="message-form">
-          <textarea id="messageBoardContent" maxlength="1000" rows="4" placeholder="写点什么吧……" required></textarea>
+          <textarea id="messageBoardContent" maxlength="1000" rows="3" placeholder="写点什么吧……" required></textarea>
           <div class="message-form-options">
             <label class="checkbox-line"><input type="checkbox" id="messageBoardAnonymous"><span>匿名发布</span></label>
             <span class="muted" id="messageBoardMentionHint">在留言中输入 @用户名，可以提醒对应选手。</span>
@@ -135,6 +135,7 @@
         <div class="empty" id="messageBoardLoginHint">请先登录后再留言。</div>
       </div>
       <div id="messageBoardList" class="message-board-list"><div class="empty">正在加载留言板……</div></div>
+      <div id="messageBoardPagination" class="message-board-pagination" aria-label="留言板分页"></div>
     </section>
 
     <section class="view" id="view-rules">
