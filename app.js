@@ -50,10 +50,17 @@ let realtimeChannel = null;
 let currentView = 'dashboard';
 let authMode = 'login';
 let passwordChangeRequired = false;
+let startupAttempt = 0;
+let themeMediaQuery = null;
 
 const $ = id => document.getElementById(id);
 const els = {
   liveStatus: $('liveStatus'),
+  startupOverlay: $('startupOverlay'),
+  startupTitle: $('startupTitle'),
+  startupMessage: $('startupMessage'),
+  startupRetryBtn: $('startupRetryBtn'),
+  themeSelect: $('themeSelect'),
   authActions: $('authActions'),
   loginBtn: $('loginBtn'),
   signupBtn: $('signupBtn'),
@@ -280,6 +287,71 @@ function updatePreview() {
   els.previewM.textContent = calc.m.toFixed(3);
   els.previewE.textContent = formatPct(aWon ? calc.e : 1 - calc.e);
   els.matchPreview.innerHTML = `<div class="preview-main"><div class="preview-side"><div class="preview-name">${esc(a.real_name)}</div><div class="preview-rating">赛前 ${formatRating(aR)}</div></div><div class="delta ${aDelta >= 0 ? 'positive' : 'negative'}">${aDelta>=0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-vs">${sa}:${sb}</div><div class="delta ${aDelta >= 0 ? 'negative' : 'positive'}">${aDelta<0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-side"><div class="preview-name">${esc(b.real_name)}</div><div class="preview-rating">赛前 ${formatRating(bR)}</div></div></div><div class="preview-footer">胜者：<strong>${esc(winner.real_name)}</strong> · 负者：${esc(loser.real_name)} · 仅确认后计入积分</div>`;
+}
+
+function getSystemTheme() {
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyTheme(mode) {
+  const normalized = ['light','dark','system'].includes(mode) ? mode : 'system';
+  const actual = normalized === 'system' ? getSystemTheme() : normalized;
+  document.documentElement.dataset.theme = actual;
+  if (els.themeSelect) els.themeSelect.value = normalized;
+  localStorage.setItem('cyez-theme', normalized);
+  if (themeMediaQuery) themeMediaQuery.onchange = null;
+  if (normalized === 'system' && window.matchMedia) {
+    themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    themeMediaQuery.onchange = () => document.documentElement.dataset.theme = getSystemTheme();
+  }
+}
+function initTheme() {
+  applyTheme(localStorage.getItem('cyez-theme') || 'system');
+  if (els.themeSelect) els.themeSelect.addEventListener('change', e => applyTheme(e.target.value));
+}
+function showStartupConnecting() {
+  if (!els.startupOverlay) return;
+  els.startupOverlay.hidden = false;
+  els.startupOverlay.classList.remove('error-state');
+  els.startupTitle.textContent = '正在连接服务器';
+  els.startupMessage.textContent = '正在连接 CYEZ 云端数据库，请稍候…';
+  els.startupRetryBtn.hidden = true;
+}
+function showStartupError(message='服务器连接超时，请稍后再试。') {
+  if (!els.startupOverlay) return;
+  els.startupOverlay.hidden = false;
+  els.startupOverlay.classList.add('error-state');
+  els.startupTitle.textContent = '暂时无法连接服务器';
+  els.startupMessage.textContent = message;
+  els.startupRetryBtn.hidden = false;
+}
+function hideStartupOverlay() {
+  if (!els.startupOverlay) return;
+  els.startupOverlay.classList.add('closing');
+  setTimeout(()=>{ els.startupOverlay.hidden = true; els.startupOverlay.classList.remove('closing'); }, 180);
+}
+async function bootWithTimeout(timeoutMs=12000) {
+  const attempt = ++startupAttempt;
+  showStartupConnecting();
+  if (!supabaseClient) {
+    showStartupError('尚未配置 Supabase，请先检查 supabase-config.js。');
+    return false;
+  }
+  const boot = (async()=>{
+    await loadSession();
+    await refreshData();
+  })();
+  const timeout = new Promise((_, reject)=>setTimeout(()=>reject(new Error('TIMEOUT')), timeoutMs));
+  try {
+    await Promise.race([boot, timeout]);
+    if (attempt !== startupAttempt) return false;
+    hideStartupOverlay();
+    return true;
+  } catch (e) {
+    if (attempt !== startupAttempt) return false;
+    if (e?.message === 'TIMEOUT') showStartupError('服务器连接超时，请稍后再试。');
+    else showStartupError(e?.message || '服务器连接失败，请稍后再试。');
+    return false;
+  }
 }
 
 function unreadNotificationCount() {
@@ -560,7 +632,7 @@ function navigate(view) {
 }
 
 function showToast(message, type='success') {
-  const t=document.createElement('div'); t.className=`toast ${type}`; t.textContent=message; els.toastRegion.appendChild(t); setTimeout(()=>t.remove(),4500);
+  const t=document.createElement('div'); t.className=`toast ${type}`; t.setAttribute('role','status'); t.textContent=message; els.toastRegion.appendChild(t); setTimeout(()=>t.remove(),3200);
 }
 
 function openAuth(mode='login') { els.authBackdrop.hidden=false; switchAuthTab(mode); setTimeout(()=> (authMode==='login'?els.loginUsername:els.signupRealName).focus(),30); }
@@ -578,6 +650,10 @@ function openProfile(options={}) {
     ? `<div><span>首次登录</span><strong>请先修改初始密码</strong></div><div><span>初始密码</span><strong>11111111</strong></div>`
     : `<div><span>角色</span><strong>${currentProfile.role==='admin'?'管理员':currentProfile.role==='moderator'?'副管理员':'选手'}</strong></div><div><span>状态</span><strong>${currentProfile.is_banned?'封禁':'正常'}</strong></div>`;
   els.profileRealName.value=currentProfile.real_name;
+  els.profileRealName.readOnly = !isAdmin();
+  els.profileRealName.classList.toggle('readonly-field', !isAdmin());
+  const realNameHint = document.getElementById('profileRealNameHint');
+  if (realNameHint) realNameHint.textContent = isAdmin() ? '管理员可以在必要时修正选手真实姓名；普通选手不能自行修改。' : '真实姓名由学校信息确定，选手不能自行修改。';
   els.profileUsername.value=currentProfile.username;
   els.profileClose.hidden=required;
   els.profileForm.hidden=required;
@@ -618,7 +694,11 @@ async function signUp() {
   const email=`${username}@login.cyez.local`;
   const {error:loginError}=await supabaseClient.auth.signInWithPassword({email,password});
   if(loginError) throw new Error('注册成功，但自动登录失败，请使用新用户名和密码登录。');
-  closeAuth(); await loadSession(); await refreshData(); showToast('感谢注册CYEZ乒乓社积分系统');
+  closeAuth();
+  els.signupForm.reset();
+  await loadSession();
+  await refreshData();
+  showToast('感谢注册CYEZ乒乓社积分系统');
 }
 
 async function signIn() {
@@ -631,12 +711,22 @@ async function signIn() {
   const email=`${p.username}@login.cyez.local`;
   const { error }=await supabaseClient.auth.signInWithPassword({email,password});
   if (error) throw error;
-  closeAuth(); await loadSession(); showToast('登录成功。');
+  closeAuth();
+  els.loginForm.reset();
+  await loadSession();
+  showToast('登录成功。');
 }
 
 async function signOut() {
-  if (supabaseClient) await supabaseClient.auth.signOut();
-  currentUser=null; currentProfile=null; passwordChangeRequired=false; updateAuthUi(); refreshSelects(); renderDashboard(); renderHistory(); renderAdmin(); showToast('已退出登录。');
+  try {
+    if (supabaseClient) { const {error}=await supabaseClient.auth.signOut(); if(error) throw error; }
+    closeProfile(true);
+    currentUser=null; currentProfile=null; passwordChangeRequired=false;
+    updateAuthUi(); refreshSelects(); renderDashboard(); renderHistory(); renderAdmin();
+    showToast('已退出登录。');
+  } catch(e) {
+    showToast(e.message || '退出登录失败。','error');
+  }
 }
 
 async function loadSession() {
@@ -902,7 +992,7 @@ async function saveProfile(e) {
     if (!currentUser || !currentProfile) throw new Error('请先登录。');
     if (currentProfile.is_banned) throw new Error('封禁账号不能修改账号资料。');
 
-    const name = els.profileRealName.value.trim();
+    const name = isAdmin() ? els.profileRealName.value.trim() : currentProfile.real_name;
     const username = els.profileUsername.value.trim().toLowerCase();
     if (!name) throw new Error('姓名不能为空。');
     if (!/^[a-z0-9_.-]{3,24}$/.test(username)) {
@@ -947,19 +1037,21 @@ function setupRealtime() {
 
 async function init() {
   populateCompetition(); setDefaultDate();
+  initTheme();
   bindEvents();
-  if (!supabaseClient) { renderUnconfigured(); updateAuthUi(); return; }
-  try {
-    await loadSession();
-    await refreshData();
-    setupRealtime();
-    supabaseClient.auth.onAuthStateChange(async (_event, session)=>{
-      currentUser=session?.user || null;
+  const ok = await bootWithTimeout();
+  if (!ok) return;
+  setupRealtime();
+  supabaseClient.auth.onAuthStateChange(async (_event, session)=>{
+    currentUser=session?.user || null;
+    try {
       await fetchCurrentProfile();
       updateAuthUi();
-      try { await refreshData(); await loadNotifications(); } catch(e) { console.error(e); }
-    });
-  } catch(e) { showToast(e.message||'连接数据库失败。','error'); }
+      await refreshData();
+      await loadNotifications();
+    } catch(e) { console.error(e); showToast(e.message || '账号状态更新失败。','error'); }
+  });
+  updateAuthUi();
 }
 
 function bindEvents() {
@@ -987,6 +1079,7 @@ function bindEvents() {
   });
   document.querySelectorAll('[data-auth-tab]').forEach(btn=>btn.addEventListener('click',()=>switchAuthTab(btn.dataset.authTab)));
   // 登录/注册按钮通过 updateAuthUi() 设置 onclick；这里不要再绑定 openAuth，否则登录后点击“我的账号”会同时弹出认证弹窗。
+  els.startupRetryBtn?.addEventListener('click',()=>bootWithTimeout());
   els.authClose.addEventListener('click',closeAuth);
   els.authBackdrop.addEventListener('click',e=>{if(e.target===els.authBackdrop)closeAuth();});
   els.loginForm.addEventListener('submit',async e=>{e.preventDefault();try{await signIn();}catch(err){showToast(err.message||'登录失败。','error');}});
