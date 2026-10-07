@@ -537,7 +537,7 @@
     if(els.createBtn)els.createBtn.addEventListener('click',openCreateTournament);
     if(els.createClose)els.createClose.addEventListener('click',closeCreateTournament);
     if($('tournamentCreateClose2'))$('tournamentCreateClose2').addEventListener('click',closeCreateTournament);
-    if(els.createBackdrop)els.createBackdrop.addEventListener('click',e=>{if(e.target===els.createBackdrop)closeCreateTournament();});
+    if(els.createBackdrop){let down=false;els.createBackdrop.addEventListener('pointerdown',e=>{down=e.target===els.createBackdrop;});els.createBackdrop.addEventListener('pointerup',e=>{const close=down&&e.target===els.createBackdrop;down=false;if(close)closeCreateTournament();});els.createBackdrop.addEventListener('pointercancel',()=>{down=false;});}
     if(els.createForm)els.createForm.addEventListener('submit',submitCreateTournament);
     if(els.createFormat)els.createFormat.addEventListener('change',updateCreateFormatUI);
     if(els.search)els.search.addEventListener('input',renderTournamentList);
