@@ -9,13 +9,21 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+  <div id="startupOverlay" class="startup-overlay" aria-live="polite">
+    <div class="startup-card">
+      <div class="startup-spinner" aria-hidden="true"></div>
+      <h2 id="startupTitle">正在连接服务器</h2>
+      <p id="startupMessage">正在连接 CYEZ 云端数据库，请稍候…</p>
+      <button id="startupRetryBtn" class="btn btn-primary" hidden>重新连接</button>
+    </div>
+  </div>
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark">C</div>
       <div class="brand-title">CYEZ乒乓球积分系统</div>
     </div>
     <div class="top-actions" id="authActions">
-      <span class="live-pill" id="liveStatus"><i></i> 实时同步中</span>
+      <span class="live-pill" id="liveStatus"><i></i> 实时同步中</span><select id="themeSelect" class="theme-select" aria-label="主题模式"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select>
       <button class="btn btn-ghost" id="loginBtn">登录</button><button class="btn btn-primary" id="signupBtn">注册</button>
     </div>
   </header>
@@ -199,7 +207,7 @@
       <div id="profileSummary" class="profile-summary"></div>
       <form id="profileForm" class="auth-form">
         <div class="profile-section-title">基本资料</div>
-        <div class="field"><label for="profileRealName">真实姓名</label><input id="profileRealName" maxlength="40" required></div>
+        <div class="field"><label for="profileRealName">真实姓名</label><input id="profileRealName" maxlength="40" required readonly><div class="password-hint" id="profileRealNameHint">真实姓名由学校信息确定，选手不能自行修改。</div></div>
         <div class="field"><label for="profileUsername">用户名</label><input id="profileUsername" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_.-]+" required></div>
         <div class="password-hint">用户名需为 3–24 位小写字母、数字、下划线、点或短横线。修改后请使用新用户名登录。</div>
         <button class="btn btn-primary full-width" type="submit">保存资料</button>
