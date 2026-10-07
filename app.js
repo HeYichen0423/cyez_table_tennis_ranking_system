@@ -124,12 +124,15 @@ const els = {
   adminCreateUserForm: $('adminCreateUserForm'),
   adminCreateRealName: $('adminCreateRealName'),
   adminCreateUsername: $('adminCreateUsername'),
+  adminCreateResult: $('adminCreateResult'),
+  adminCreateResultUsername: $('adminCreateResultUsername'),
+  adminCreateResultPassword: $('adminCreateResultPassword'),
+  adminCreateCopyPassword: $('adminCreateCopyPassword'),
   adminResetBackdrop: $('adminResetBackdrop'),
   adminResetClose: $('adminResetClose'),
   adminResetSummary: $('adminResetSummary'),
   adminResetForm: $('adminResetForm'),
   adminResetPassword: $('adminResetPassword'),
-  generateTempPasswordBtn: $('generateTempPasswordBtn'),
   notificationBadge: $('notificationBadge'),
   notificationsList: $('notificationsList'),
   markAllNotificationsBtn: $('markAllNotificationsBtn'),
@@ -808,7 +811,7 @@ function openProfile(options={}) {
   const required = !!options.required || passwordChangeRequired;
   passwordChangeRequired = required;
   els.profileSummary.innerHTML = required
-    ? `<div><span>首次登录</span><strong>请先修改初始密码</strong></div><div><span>初始密码</span><strong>11111111</strong></div>`
+    ? `<div><span>账号状态</span><strong>请先完成密码修改</strong></div><div><span>提示</span><strong>当前密码由管理员或系统安全地提供</strong></div>`
     : `<div><span>角色</span><strong>${currentProfile.role==='admin'?'管理员':currentProfile.role==='moderator'?'副管理员':'选手'}</strong></div><div><span>状态</span><strong>${currentProfile.is_banned?'封禁':'正常'}</strong></div>`;
   els.profileRealName.value=currentProfile.real_name;
   els.profileRealName.readOnly = !isAdmin();
@@ -822,7 +825,7 @@ function openProfile(options={}) {
   els.logoutBtn.hidden=false;
   els.passwordForm.classList.toggle('required-password-form', required);
   els.passwordForm.querySelector('.password-hint').textContent = required
-    ? '这是管理员创建账号时设置的初始密码。首次登录必须修改为你自己的密码，修改完成后才能继续使用系统。'
+    ? '请使用当前临时密码设置一个新的个人密码。完成后才能继续使用系统。'
     : '为了保护账号，请先输入当前密码，再设置新的密码。密码至少 8 位。';
   if (required && !els.profileCurrentPassword.value) els.profileCurrentPassword.value='';
   els.profileBackdrop.hidden=false;
@@ -902,7 +905,7 @@ async function fetchCurrentProfile() {
   const { data,error }=await supabaseClient.from('profiles').select('*').eq('id',currentUser.id).maybeSingle();
   if (error) throw error;
   currentProfile=data;
-  passwordChangeRequired = !!currentUser?.user_metadata?.must_change_password;
+  passwordChangeRequired = !!currentProfile?.password_change_required;
   if (currentProfile?.is_banned) {
     showToast('你的账号已被管理员封禁。','error');
   }
@@ -1030,18 +1033,11 @@ async function deleteUser(userId) {
   }
 }
 
-function generateTempPassword(length=12) {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
-  const array = new Uint32Array(length);
-  crypto.getRandomValues(array);
-  let out='';
-  for (let i=0;i<length;i++) out += alphabet[array[i] % alphabet.length];
-  return out;
-}
-
 function openAdminCreateUser() {
   if (!isAdmin()) { showToast('只有 admin 可以直接创建账号。','error'); return; }
   els.adminCreateUserForm.reset();
+  if (els.adminCreateResult) els.adminCreateResult.hidden=true;
+  els.adminCreateUserForm.hidden=false;
   els.adminCreateUserBackdrop.hidden=false;
   setTimeout(()=>els.adminCreateRealName.focus(),30);
 }
@@ -1049,6 +1045,10 @@ function openAdminCreateUser() {
 function closeAdminCreateUser() {
   els.adminCreateUserBackdrop.hidden=true;
   els.adminCreateUserForm.reset();
+  els.adminCreateUserForm.hidden=false;
+  if (els.adminCreateResult) els.adminCreateResult.hidden=true;
+  if (els.adminCreateResultUsername) els.adminCreateResultUsername.textContent='';
+  if (els.adminCreateResultPassword) els.adminCreateResultPassword.value='';
 }
 
 async function adminCreateUser(e) {
@@ -1064,9 +1064,14 @@ async function adminCreateUser(e) {
     });
     if (error) throw error;
     if (!data?.success) throw new Error(data?.error || '账号创建失败。');
-    closeAdminCreateUser();
-    await refreshData();
-    showToast(`账号 ${username} 创建成功。初始密码为 11111111，请交给本人并要求首次登录后修改。`);
+    if (!data?.temp_password) throw new Error('账号已创建，但服务器没有返回临时密码。请不要关闭窗口，并联系管理员检查 Edge Function。');
+    els.adminCreateUserForm.hidden=true;
+    els.adminCreateResultUsername.textContent=username;
+    els.adminCreateResultPassword.value=data.temp_password;
+    els.adminCreateResult.hidden=false;
+    els.adminCreateResultPassword.select();
+    showToast(`账号 ${username} 创建成功。`);
+    try { await refreshData(); } catch (refreshError) { console.error(refreshError); showToast('账号已经创建成功，但页面数据刷新失败，请稍后手动刷新。','error'); }
   } catch(err) {
     showToast(err.message || '账号创建失败。请确认 admin-create-user Edge Function 已部署。','error');
   }
@@ -1081,14 +1086,15 @@ function openAdminResetPassword(userId) {
   }
   els.adminResetSummary.innerHTML=`<div><span>真实姓名</span><strong>${esc(p.real_name)}</strong></div><div><span>用户名</span><strong>@${esc(p.username)}</strong></div>`;
   els.adminResetForm.dataset.targetUserId=userId;
-  els.adminResetPassword.value=generateTempPassword();
+  els.adminResetPassword.value='';
+  els.adminResetPassword.readOnly=true;
   els.adminResetBackdrop.hidden=false;
-  setTimeout(()=>els.adminResetPassword.select(),30);
 }
 
 function closeAdminResetPassword() {
   els.adminResetBackdrop.hidden=true;
   els.adminResetForm.reset();
+  els.adminResetPassword.readOnly=true;
 }
 
 async function adminResetPassword(e) {
@@ -1099,23 +1105,21 @@ async function adminResetPassword(e) {
     showToast('没有选择需要重置密码的用户。','error');
     return;
   }
-  const password = els.adminResetPassword.value;
-  if (password.length < 8) {
-    showToast('临时密码至少 8 位。','error');
-    return;
-  }
   try {
     const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
     if (sessionError) throw sessionError;
     const token = sessionData.session?.access_token;
     if (!token) throw new Error('登录状态已失效，请重新登录。');
     const { data, error } = await supabaseClient.functions.invoke('admin-reset-password', {
-      body: { target_user_id: targetUserId, password }
+      body: { target_user_id: targetUserId }
     });
     if (error) throw error;
     if (!data?.success) throw new Error(data?.error || '密码重置失败。');
-    closeAdminResetPassword();
-    showToast(`已为 ${playerLabel(targetUserId)} 设置新的临时密码。请安全地转交给用户，并让其登录后立即修改。`);
+    if (!data?.temp_password) throw new Error('密码已处理，但服务器没有返回临时密码。请不要关闭窗口，并检查 Edge Function。');
+    els.adminResetPassword.readOnly = true;
+    els.adminResetPassword.value = data.temp_password;
+    els.adminResetPassword.select();
+    showToast(`已为 ${playerLabel(targetUserId)} 生成新的临时密码。请先复制并安全地交给用户。`);
   } catch(e) {
     showToast(e.message || '管理员重置密码失败。请确认 Edge Function 已部署。','error');
   }
@@ -1128,17 +1132,28 @@ async function changeOwnPassword(e) {
     const currentPassword=els.profileCurrentPassword.value;
     const newPassword=els.profileNewPassword.value;
     const confirmPassword=els.profileConfirmPassword.value;
+    if (currentPassword.length < 8) throw new Error('当前密码无效。');
     if (newPassword.length < 8) throw new Error('新密码至少 8 位。');
     if (newPassword !== confirmPassword) throw new Error('两次输入的新密码不一致。');
     if (newPassword === currentPassword) throw new Error('新密码不能与当前密码相同。');
-    const { data, error } = await supabaseClient.auth.updateUser({
-      password:newPassword,
-      current_password:currentPassword,
-      data:{ must_change_password:false }
+
+    const { data, error } = await supabaseClient.functions.invoke('change-own-password', {
+      body: { current_password: currentPassword, new_password: newPassword }
     });
-    if (error) throw error;
-    currentUser = data.user || currentUser;
-    passwordChangeRequired = false;
+    if (error) {
+      let msg=error.message||'密码修改失败。';
+      try { if(error.context && typeof error.context.json==='function'){const payload=await error.context.json(); if(payload?.error)msg=payload.error;} } catch(_){}
+      throw new Error(msg);
+    }
+    if (!data?.success) throw new Error(data?.error || '密码修改失败。');
+
+    const email=`${currentProfile.username}@login.cyez.local`;
+    const { error:loginError } = await supabaseClient.auth.signInWithPassword({ email, password:newPassword });
+    if (loginError) throw new Error('密码已经修改成功，但自动重新登录失败，请重新登录。');
+
+    await loadSession();
+    await fetchCurrentProfile();
+    passwordChangeRequired = !!currentProfile?.password_change_required;
     els.passwordForm.reset();
     closeProfile(true);
     showToast('密码修改成功。现在可以正常使用系统了。');
@@ -1299,13 +1314,18 @@ function bindEvents() {
   els.adminCreateUserCancel.addEventListener('click',closeAdminCreateUser);
   installBackdropClose(els.adminCreateUserBackdrop, closeAdminCreateUser);
   els.adminCreateUserForm.addEventListener('submit',adminCreateUser);
+  els.adminCreateCopyPassword?.addEventListener('click',async ()=>{
+    const value=els.adminCreateResultPassword?.value||'';
+    if(!value)return;
+    try{await navigator.clipboard.writeText(value);showToast('临时密码已复制。');}
+    catch(_){els.adminCreateResultPassword.select();showToast('浏览器未允许自动复制，请手动复制。','error');}
+  });
   els.profileForm.addEventListener('submit',saveProfile);
   els.passwordForm.addEventListener('submit',changeOwnPassword);
   els.logoutBtn.addEventListener('click',signOut);
   els.adminResetClose.addEventListener('click',closeAdminResetPassword);
   installBackdropClose(els.adminResetBackdrop, closeAdminResetPassword);
   els.adminResetForm.addEventListener('submit',adminResetPassword);
-  els.generateTempPasswordBtn.addEventListener('click',()=>{els.adminResetPassword.value=generateTempPassword(); els.adminResetPassword.select();});
   els.matchForm.addEventListener('submit',submitMatch);
   els.matchForm.addEventListener('reset',()=>setTimeout(()=>{setDefaultDate();updateRatingsInForm();updatePreview();},0));
   [els.playerA,els.playerB,els.scoreA,els.scoreB,els.competitionType].forEach(el=>el.addEventListener('input',updatePreview));
