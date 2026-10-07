@@ -461,12 +461,7 @@ async function loadMessageBoard() {
   }
   const ids = state.boardPosts.map(p=>p.id);
   if (!ids.length) { state.boardComments=[]; renderMessageBoard(); return; }
-  const { data: comments, error: cErr } = await supabaseClient
-    .from('message_board_comments')
-    .select('id,post_id,author_id,content,created_at,deleted_at')
-    .in('post_id', ids)
-    .is('deleted_at', null)
-    .order('created_at',{ascending:true});
+  const { data: comments, error: cErr } = await supabaseClient.rpc('message_board_comments_list',{p_post_ids:ids});
   if (cErr) throw cErr;
   state.boardComments=comments||[];
   renderMessageBoard();
