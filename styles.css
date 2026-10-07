@@ -7,6 +7,12 @@
 .banner-actions{display:flex;gap:8px;align-items:center}.top-actions{display:flex;gap:8px;align-items:center}
 
 .password-form{border-top:1px solid var(--border);padding-top:16px;margin-top:16px}
+
+.secret-result{display:grid;gap:12px;margin-top:16px;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface-2,var(--surface));}
+.secret-result-title{font-weight:800;font-size:1.05rem;}
+.secret-result-row{display:grid;grid-template-columns:90px 1fr;align-items:center;gap:10px;}
+.secret-result-row span{color:var(--muted);}
+.secret-result-row input{width:100%;}
 .password-hint{font-size:11px;color:var(--muted);background:#f7fafb;border-radius:10px;padding:10px;line-height:1.7}
 
 .auth-form[hidden]{display:none !important}
