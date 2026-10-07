@@ -105,6 +105,7 @@ html[data-theme="dark"] .startup-overlay{background:rgba(15,21,27,.98)}
 .modal.dragging{user-select:none;cursor:grabbing;transition:none!important}
 .message-board-compose{margin-bottom:18px}
 .message-form{display:grid;gap:10px}
+.message-form-options{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.checkbox-line{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;cursor:pointer}.checkbox-line input{width:15px;height:15px;margin:0;accent-color:var(--primary)}
 .message-form textarea{width:100%;resize:vertical;min-height:100px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:12px;padding:12px;font:inherit;font-size:13px;outline:none}
 .message-form textarea:focus{border-color:var(--primary)}
 .message-form-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}
