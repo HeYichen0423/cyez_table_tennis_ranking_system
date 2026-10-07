@@ -31,3 +31,69 @@
 .account-red-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c94747;margin-left:6px;vertical-align:middle;box-shadow:0 0 0 3px rgba(201,71,71,.12)}
 .notifications-list{display:flex;flex-direction:column}.notification-item{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:11px;align-items:start;padding:15px 2px;border-bottom:1px solid #eef2f5}.notification-item:last-child{border-bottom:0}.notification-item.unread{background:#fffdf8;margin:0 -8px;padding-left:10px;padding-right:10px;border-radius:10px}.notification-dot{width:8px;height:8px;border-radius:50%;background:transparent;margin-top:7px}.notification-item.unread .notification-dot{background:#c94747;box-shadow:0 0 0 4px rgba(201,71,71,.10)}.notification-title{font-weight:850;font-size:13px}.notification-body{font-size:12px;color:#5f6f7c;margin-top:4px;line-height:1.7}.notification-time{font-size:10px;color:#9aa7b1;margin-top:5px}.notification-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.inline-edit{display:flex;align-items:center;gap:5px}.initial-rating-input{width:88px;height:32px;font-size:11px}.roster-import{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.roster-import input[type=file]{height:auto;padding:8px;background:#fff}.roster-import .muted{flex:1;min-width:220px}
 @media(max-width:700px){.notification-item{grid-template-columns:8px minmax(0,1fr)}.notification-actions{grid-column:2;justify-content:flex-start}.inline-edit{flex-wrap:wrap}}
+
+/* CYEZ 2026-10：启动连接页、居中服务器提示、主题切换、真实姓名只读 */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:#0f151b;
+  --surface:#161f27;
+  --surface-2:#1c2730;
+  --text:#e8eef3;
+  --muted:#9eacb8;
+  --border:#2b3944;
+  --primary:#46a79d;
+  --primary-2:#2e8d84;
+  --accent:#e6b65c;
+  --danger:#ef7777;
+  --success:#53be98;
+  --shadow:0 10px 32px rgba(0,0,0,.24);
+}
+html[data-theme="dark"] body{background:var(--bg);color:var(--text)}
+html[data-theme="dark"] .topbar,
+html[data-theme="dark"] .nav-tabs,
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] .btn-ghost,
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] .score-presets button,
+html[data-theme="dark"] .tournament-list-item,
+html[data-theme="dark"] .bracket-match,
+html[data-theme="dark"] .bracket-player,
+html[data-theme="dark"] .player-check,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .profile-summary div,
+html[data-theme="dark"] .h2h-stat{background:var(--surface);color:var(--text);border-color:var(--border)}
+html[data-theme="dark"] .topbar,
+html[data-theme="dark"] .nav-tabs{border-color:var(--border)}
+html[data-theme="dark"] .data-table td,
+html[data-theme="dark"] .recent-item,
+html[data-theme="dark"] .notification-item,
+html[data-theme="dark"] .audit-row{border-color:var(--border)}
+html[data-theme="dark"] .data-table tbody tr:hover{background:#1a252e}
+html[data-theme="dark"] .player-panel,
+html[data-theme="dark"] .formula,
+html[data-theme="dark"] .formula-mini,
+html[data-theme="dark"] .auth-note,
+html[data-theme="dark"] .password-hint,
+html[data-theme="dark"] .notification-item.unread,
+html[data-theme="dark"] .config-warning,
+html[data-theme="dark"] .preview-box{background:var(--surface-2);color:var(--text)}
+html[data-theme="dark"] .auth-tabs{background:#111a21}
+html[data-theme="dark"] .auth-tab.active{background:var(--surface);color:var(--primary)}
+html[data-theme="dark"] .pill{background:#202b34;color:#b9c5ce}
+html[data-theme="dark"] .pill.active{background:#183b34;color:#8fe0c5}
+html[data-theme="dark"] .pill.off{background:#442b2b;color:#f0a0a0}
+html[data-theme="dark"] .callout{background:#17322f;color:#b9ece3}
+html[data-theme="dark"] .account-banner{background:#17322f;border-color:#28564f}
+html[data-theme="dark"] .notice-card{background:#3a2d16;border-color:#6a5124;color:#f0d69c}
+html[data-theme="dark"] .startup-card{background:var(--surface);color:var(--text)}
+html[data-theme="dark"] .theme-select{background:var(--surface);color:var(--text);border-color:var(--border)}
+html[data-theme="dark"] .modal-backdrop{background:rgba(0,0,0,.62)}
+html[data-theme="dark"] code{background:#202a33;color:#dce7ee}
+
+.startup-overlay{position:fixed;inset:0;z-index:120;background:rgba(244,247,249,.98);display:grid;place-items:center;padding:20px;transition:opacity .18s ease}.startup-overlay[hidden]{display:none}.startup-overlay.closing{opacity:0}.startup-card{width:min(380px,100%);padding:32px 26px;border:1px solid var(--border);border-radius:22px;background:#fff;box-shadow:0 24px 80px rgba(22,38,55,.12);text-align:center}.startup-card h2{font-size:19px;margin:16px 0 8px}.startup-card p{font-size:13px;line-height:1.8}.startup-spinner{width:42px;height:42px;margin:0 auto;border-radius:50%;border:4px solid #dce9e7;border-top-color:var(--primary);animation:cyez-spin .8s linear infinite}.startup-overlay.error-state .startup-spinner{border-color:#f1dddd;border-top-color:var(--danger);animation:none}.startup-overlay.error-state .startup-card{border-color:#ecd1d1}.startup-overlay.error-state .startup-card h2{color:var(--danger)}.startup-overlay .btn{margin-top:18px;min-width:120px}@keyframes cyez-spin{to{transform:rotate(360deg)}}
+html[data-theme="dark"] .startup-overlay{background:rgba(15,21,27,.98)}
+
+.toast-region{position:fixed;inset:0;z-index:110;display:flex;align-items:center;justify-content:center;pointer-events:none;padding:20px}.toast{pointer-events:none;min-width:250px;max-width:min(460px,calc(100vw - 40px));padding:18px 22px;border-radius:16px;text-align:center;line-height:1.7;font-size:14px;font-weight:750;box-shadow:0 24px 70px rgba(0,0,0,.20);animation:cyez-toast-in .18s ease both}.toast.success{background:#176a58;color:#fff}.toast.error{background:#873d3d;color:#fff}.toast::before{display:block;font-size:20px;line-height:1;margin-bottom:6px}.toast.success::before{content:'✓'}.toast.error::before{content:'!'}.theme-select{height:34px;min-width:94px;border-radius:9px;font-size:11px;font-weight:800;padding:0 8px;background:#fff;border:1px solid var(--border);color:var(--text)}.readonly-field{background:var(--surface-2)!important;color:var(--muted)!important;cursor:not-allowed}
+@keyframes cyez-toast-in{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:700px){.theme-select{min-width:82px}.startup-card{padding:28px 20px}}
