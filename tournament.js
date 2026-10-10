@@ -17,7 +17,7 @@
     district_city: { name: '区赛 / 市赛', weight: 0.8 },
     special: { name: '专项赛', weight: 1.0 }
   };
-  const FORMAT_NAMES = { group_knockout: '小组循环 + 淘汰赛制', single_elim: '单败淘汰制', double_elim: '双败淘汰制' };
+  const FORMAT_NAMES = { none: '无', group_knockout: '小组循环 + 淘汰赛制', single_elim: '单败淘汰制', double_elim: '双败淘汰制' };
   const STATUS_NAMES = { draft: '草稿', in_progress: '进行中', completed: '已结束', cancelled: '已取消', scheduled: '待进行', completed_match: '已结束', bye: '轮空' };
 
   const state = { tournaments: [], selectedId: null, entries: [], allEntries: [], matches: [], profiles: [], currentProfile: null, playerFilter: '', realtime: null, refreshTimer: null };
@@ -289,7 +289,7 @@
     els.list.innerHTML=filtered.map(t=>{
       const active=t.id===state.selectedId;
       const comp=TOURNAMENT_COMPETITIONS[t.competition_id]||{name:t.competition_id,weight:'—'};
-      return `<button class="tournament-list-item ${active?'active':''}" data-tournament-select="${t.id}"><div><strong>${esc(t.name)}</strong><span>${esc(FORMAT_NAMES[t.format]||t.format)} · ${esc(comp.name)}</span></div><div class="tournament-list-meta"><b>${statusText(t.status)}</b><span>${dateText(t.start_at)}</span></div></button>`;
+      return `<button class="tournament-list-item ${active?'active':''}" data-tournament-select="${t.id}"><div><strong>${esc(t.name)}</strong><span>${t.format==='none'?'':`${esc(FORMAT_NAMES[t.format]||t.format)} · `}${esc(comp.name)}</span></div><div class="tournament-list-meta"><b>${statusText(t.status)}</b><span>${dateText(t.start_at)}</span></div></button>`;
     }).join('')||'<div class="empty">没有符合条件的赛事。</div>';
   }
 
@@ -375,12 +375,11 @@
     const groupDone=t.format==='group_knockout' && state.matches.some(m=>m.stage==='group') && state.matches.filter(m=>m.stage==='group').every(m=>m.status==='completed');
     const hasKnockout=state.matches.some(m=>m.stage==='knockout');
     const staffActions=isStaff()?`<div class="form-actions"><button class="btn btn-ghost" data-tour-status="completed">结束赛事</button><button class="btn btn-ghost" data-tour-status="cancelled">取消赛事</button>${t.format==='group_knockout'&&groupDone&&!hasKnockout?`<button class="btn btn-ghost" data-generate-knockout>生成淘汰赛空签位</button>`:''}<button class="btn btn-danger" data-delete-tournament>彻底删除赛事</button></div>`:'';
-    const note=t.format==='group_knockout'?'小组分组、位置和淘汰赛首轮签位全部由管理员/副管理员手动填写。':t.format==='double_elim'?'双败赛制：签位由管理员/副管理员手动填写，赛果确认后系统仅按既定线路推进。':'单败赛制：首轮签位由管理员/副管理员手动填写，赛果确认后按既定线路推进。';
-    els.detail.innerHTML=`<div class="tournament-detail-head"><div><div class="eyebrow">TOURNAMENT</div><h1>${esc(t.name)}</h1><p>${esc(FORMAT_NAMES[t.format])} · ${esc(comp.name)}（权重 ${comp.weight}） · ${dateText(t.start_at)}</p></div><div class="tournament-actions"><span class="pill ${t.status==='completed'?'active':''}">${statusText(t.status)}</span>${staffActions}</div></div>
+    const note=t.format==='none'?'':t.format==='group_knockout'?'小组分组、位置和淘汰赛首轮签位全部由管理员/副管理员手动填写。':t.format==='double_elim'?'双败赛制：签位由管理员/副管理员手动填写，赛果确认后系统仅按既定线路推进。':'单败赛制：首轮签位由管理员/副管理员手动填写，赛果确认后按既定线路推进。';
+    els.detail.innerHTML=`<div class="tournament-detail-head"><div><div class="eyebrow">TOURNAMENT</div><h1>${esc(t.name)}</h1><p>${t.format==='none'?'':`${esc(FORMAT_NAMES[t.format])} · `}${esc(comp.name)}（权重 ${comp.weight}） · ${dateText(t.start_at)}</p></div><div class="tournament-actions"><span class="pill ${t.status==='completed'?'active':''}">${statusText(t.status)}</span>${staffActions}</div></div>
       <div class="tournament-stat-strip"><div><span>参赛人数</span><strong>${state.entries.length}</strong></div><div><span>已完成比赛</span><strong>${state.matches.filter(m=>m.status==='completed').length}</strong></div><div><span>比赛节点</span><strong>${state.matches.length}</strong></div><div><span>赛事权重</span><strong>${comp.weight}</strong></div></div>
-      <div class="card"><div class="card-head"><div><h3>赛事说明</h3><span class="muted">${esc(note)}</span></div></div><div class="participant-chips">${participantNames.map(n=>`<span class="pill">${esc(n)}</span>`).join('')}</div></div>
-      ${t.format==='group_knockout'?groupView():''}
-      ${knockoutSection()}`;
+      <div class="card"><div class="card-head"><div><h3>${t.format==='none'?'参赛选手':'赛事说明'}</h3>${note?`<span class="muted">${esc(note)}</span>`:''}</div></div><div class="participant-chips">${participantNames.map(n=>`<span class="pill">${esc(n)}</span>`).join('')}</div></div>
+      ${t.format==='none'?'':t.format==='group_knockout'?groupView():knockoutSection()}`;
   }
 
   function updateStaffButton(){ if(els.createBtn) els.createBtn.hidden=!isStaff(); }
@@ -403,7 +402,9 @@
     const hybrid=els.createFormat.value==='group_knockout';
     els.createGroupCount.closest('.field').hidden=!hybrid;
     els.createAdvance.closest('.field').hidden=!hybrid;
-    els.createNote.textContent=els.createFormat.value==='double_elim'
+    els.createNote.textContent=els.createFormat.value==='none'
+      ? '不设置固定赛制。创建赛事后，管理员直接在“录入比赛”页面录入比赛；选手界面不会显示赛制标识。'
+      : els.createFormat.value==='double_elim'
       ? '双败淘汰制支持 4-32 人。创建后不会自动抽签，请由管理员/副管理员手动填写胜者组首轮签位；轮空也需手动确认。'
       : hybrid
         ? '小组人数与选手分组均由管理员/副管理员手动安排；系统不会自动抽签。分组完成后由管理员手动生成小组赛程。'
@@ -413,6 +414,7 @@
   function createStructure(selected,format,groupCount,advance) {
     // 不再按积分或姓名排序，也不再把选手自动放入任何签位。
     const entries=selected.map((p,i)=>({player_id:p.id,seed:i+1,group_no:null,slot_no:null}));
+    if(format==='none') return {entries,matches:[]};
     if(format==='single_elim') return {entries,matches:makeEliminationMatches(selected.length,'winners','winners').all};
     if(format==='double_elim') return {entries,matches:makeDoubleElimMatches(selected.length).all};
     return {entries,matches:[]};
@@ -427,13 +429,14 @@
       const format=els.createFormat.value;const groupCount=Number(els.createGroupCount.value||0);const advance=Number(els.createAdvance.value||2);
       if(!els.createName.value.trim())throw new Error('请输入赛事名称。');
       if(selected.length<2)throw new Error('至少选择 2 名选手。');
+      if(format==='none') { /* 无固定赛制：只记录参赛名单，不生成签位 */ }
       if(format==='double_elim'&&(selected.length<4||selected.length>32))throw new Error('双败淘汰制支持 4-32 名选手。');
       if(format==='group_knockout'){if(groupCount<2)throw new Error('小组赛至少需要 2 组。');if(selected.length<groupCount*3)throw new Error('建议每组至少 3 人，请减少组数或增加参赛人数。');if(advance*groupCount>64)throw new Error('晋级人数过多，请降低每组晋级人数。');}
       const structure=createStructure(selected,format,groupCount,advance);
       const start=new Date(els.createStart.value).toISOString();
       const {data,error}=await client.rpc('staff_create_tournament',{p_name:els.createName.value.trim(),p_competition_id:els.createCompetition.value,p_format:format,p_start_at:start,p_group_count:format==='group_knockout'?groupCount:0,p_advance_per_group:format==='group_knockout'?advance:1,p_entries:structure.entries,p_matches:structure.matches});
       if(error)throw error;
-      closeCreateTournament(); await refreshTournaments(data); showToast('赛事创建成功。当前为手动签位模式，请在赛事详情中填写签位。');
+      closeCreateTournament(); await refreshTournaments(data); showToast(format==='none'?'赛事创建成功。请在“录入比赛”中直接登记比赛。':'赛事创建成功。当前为手动签位模式，请在赛事详情中填写签位。');
     }catch(err){showToast(err.message||'赛事创建失败。','error');}
   }
 
