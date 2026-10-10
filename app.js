@@ -188,7 +188,9 @@ function scoreMultiplier(w, l) {
 function calculateDelta(winnerRating, loserRating, winnerScore, loserScore, weight) {
   const e = expectedScore(winnerRating, loserRating);
   const m = scoreMultiplier(winnerScore, loserScore);
-  return { e, m, delta: K * weight * m * (1 - e) };
+  // 积分统一按 0.1 分为最小单位；同一场比赛双方加减同一个已舍入变化量，保持零和。
+  const delta = Math.round((K * weight * m * (1 - e)) * 10) / 10;
+  return { e, m, delta };
 }
 
 function sortMatches(ms) {
@@ -198,7 +200,7 @@ function sortMatches(ms) {
 }
 
 function rebuildRatings() {
-  state.ratings = new Map(state.profiles.map(p => [p.id, Number(p.initial_rating ?? INITIAL_RATING)]));
+  state.ratings = new Map(state.profiles.map(p => [p.id, Number(Number(p.initial_rating ?? INITIAL_RATING).toFixed(1))]));
   state.games = new Map(state.profiles.map(p => [p.id, 0]));
   state.wins = new Map(state.profiles.map(p => [p.id, 0]));
   state.losses = new Map(state.profiles.map(p => [p.id, 0]));
@@ -276,8 +278,13 @@ function updateRatingsInForm() {
   els.ratingB.textContent = `${formatRating(state.ratings.get(els.playerB.value) ?? INITIAL_RATING)} 分`;
   if (currentProfile) {
     const a = els.playerA.value === currentProfile.id, b = els.playerB.value === currentProfile.id;
-    els.currentParticipantNote.textContent = a || b ? '✓ 你是本场比赛参与者，提交后将由对手确认。' : '请将你自己的账号选为 A 或 B，否则无法提交。';
-    els.currentParticipantNote.className = `current-user-note ${a || b ? 'good' : 'warn'}`;
+    if (isStaff()) {
+      els.currentParticipantNote.textContent = '✓ 管理员/副管理员可为任意两名选手录入比赛，提交后立即计入积分。';
+      els.currentParticipantNote.className = 'current-user-note good';
+    } else {
+      els.currentParticipantNote.textContent = a || b ? '✓ 你是本场比赛参与者，提交后将由对手确认。' : '请将你自己的账号选为 A 或 B，否则无法提交。';
+      els.currentParticipantNote.className = `current-user-note ${a || b ? 'good' : 'warn'}`;
+    }
   } else {
     els.currentParticipantNote.textContent = '';
   }
@@ -302,7 +309,8 @@ function updatePreview() {
   els.previewC.textContent = c.weight.toFixed(1);
   els.previewM.textContent = calc.m.toFixed(3);
   els.previewE.textContent = formatPct(aWon ? calc.e : 1 - calc.e);
-  els.matchPreview.innerHTML = `<div class="preview-main"><div class="preview-side"><div class="preview-name">${esc(a.real_name)}</div><div class="preview-rating">赛前 ${formatRating(aR)}</div></div><div class="delta ${aDelta >= 0 ? 'positive' : 'negative'}">${aDelta>=0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-vs">${sa}:${sb}</div><div class="delta ${aDelta >= 0 ? 'negative' : 'positive'}">${aDelta<0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-side"><div class="preview-name">${esc(b.real_name)}</div><div class="preview-rating">赛前 ${formatRating(bR)}</div></div></div><div class="preview-footer">胜者：<strong>${esc(winner.real_name)}</strong> · 负者：${esc(loser.real_name)} · 仅确认后计入积分</div>`;
+  const resultNote = isStaff() ? '管理员/副管理员提交后立即计入积分' : '仅对手确认后计入积分';
+  els.matchPreview.innerHTML = `<div class="preview-main"><div class="preview-side"><div class="preview-name">${esc(a.real_name)}</div><div class="preview-rating">赛前 ${formatRating(aR)}</div></div><div class="delta ${aDelta >= 0 ? 'positive' : 'negative'}">${aDelta>=0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-vs">${sa}:${sb}</div><div class="delta ${aDelta >= 0 ? 'negative' : 'positive'}">${aDelta<0?'+':'−'}${formatRating(Math.abs(aDelta))}</div><div class="preview-side"><div class="preview-name">${esc(b.real_name)}</div><div class="preview-rating">赛前 ${formatRating(bR)}</div></div></div><div class="preview-footer">胜者：<strong>${esc(winner.real_name)}</strong> · 负者：${esc(loser.real_name)} · ${resultNote}</div>`;
 }
 
 function getSystemTheme() {
@@ -695,15 +703,15 @@ async function saveInitialRating(userId) {
   const p=profile(userId);
   const input=document.querySelector(`[data-initial-rating=\"${userId}\"]`);
   const rating=Number(input?.value);
-  if (!p || !Number.isFinite(rating)) { showToast('请输入有效的初始积分。','error'); return; }
-  if (rating < 500 || rating > 2500) { showToast('初始积分建议在 500–2500 之间。','error'); return; }
+  if (!p || !input || input.value.trim() === '' || !Number.isFinite(rating)) { showToast('请输入有限的数字作为初始积分。','error'); return; }
+  const initialRating = Number(rating.toFixed(1));
   const games=state.approvedMatches.filter(m=>m.player_a_id===userId||m.player_b_id===userId).length;
   if (games>0) { showToast('该选手已有生效比赛，初始积分已经锁定，不能再修改。','error'); return; }
   try {
-    const {error}=await supabaseClient.rpc('admin_set_initial_rating',{p_user_id:userId,p_initial_rating:rating});
+    const {error}=await supabaseClient.rpc('admin_set_initial_rating',{p_user_id:userId,p_initial_rating:initialRating});
     if(error)throw error;
     await refreshData();
-    showToast(`已将 ${p.real_name} 的初始积分设为 ${rating.toFixed(1)}。`);
+    showToast(`已将 ${p.real_name} 的初始积分设为 ${initialRating.toFixed(1)}。`);
   } catch(e){showToast(e.message||'初始积分修改失败。','error');}
 }
 
@@ -786,9 +794,9 @@ function renderAdmin() {
       <div class="stat-card"><div class="stat-label">封禁账号</div><div class="stat-value">${state.profiles.filter(p=>p.is_banned).length}</div></div>
     </div>
     <div class="card"><div class="card-head"><div><h2>待处理比赛</h2><span class="muted">副管理员和管理员可以审核；参赛对手可以确认。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>提交时间</th><th>比赛</th><th>比分</th><th>级别</th><th>提交人</th><th>操作</th></tr></thead><tbody>${pending.map(m=>`<tr><td>${formatDate(m.created_at)}</td><td class="name-cell">${esc(playerLabel(m.player_a_id))} vs ${esc(playerLabel(m.player_b_id))}</td><td><strong>${m.score_a}:${m.score_b}</strong></td><td>${esc(competition(m.competition_id).name)}</td><td>${esc(playerLabel(m.submitted_by))}</td><td>${matchActionHtml(m)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">没有待处理比赛。</div></td></tr>'}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以直接创建账号、封禁账号、设置初始积分、添加/取消副管理员、为用户重置密码。初始积分只建议在选手开始比赛前设置。</span></div><div><button class="btn btn-primary" data-admin-create-user>＋ 直接创建账号</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>当前积分</th><th>初始积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;const games=state.games.get(p.id)||0;const canSet=isAdmin()&&games===0&&!p.is_banned;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td>${isAdmin()?`<div class="inline-edit"><input class="initial-rating-input" data-initial-rating="${p.id}" type="number" min="500" max="2500" step="0.1" value="${Number(p.initial_rating??INITIAL_RATING).toFixed(1)}" ${canSet?'':'disabled'}><button class="text-btn" data-save-initial-rating="${p.id}" ${canSet?'':'disabled'}>保存</button></div>${games>0?'<div class="muted">已有生效比赛，已锁定</div>':''}`:formatRating(p.initial_rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="8"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以直接创建账号、封禁账号、设置初始积分、添加/取消副管理员、为用户重置密码。初始积分只建议在选手开始比赛前设置。</span></div><div><button class="btn btn-primary" data-admin-create-user>＋ 直接创建账号</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>当前积分</th><th>初始积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;const games=state.games.get(p.id)||0;const canSet=isAdmin()&&games===0&&!p.is_banned;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td>${isAdmin()?`<div class="inline-edit"><input class="initial-rating-input" data-initial-rating="${p.id}" type="number" step="0.1" value="${Number(p.initial_rating??INITIAL_RATING).toFixed(1)}" ${canSet?'':'disabled'}><button class="text-btn" data-save-initial-rating="${p.id}" ${canSet?'':'disabled'}>保存</button></div>${games>0?'<div class="muted">已有生效比赛，已锁定</div>':''}`:formatRating(p.initial_rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="8"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
     ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>学校学生大名单</h2><span class="muted">上传 student_info.xlsx，仅管理员可导入；名单不会展示给普通用户。注册时由服务器核对“学生姓名”。</span></div></div><div class="roster-import"><input id="rosterFile" type="file" accept=".xlsx" /><div id="rosterImportStatus" class="muted">请选择 student_info.xlsx。</div></div></div>`:''}
-    ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更和比赛审核/撤销会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
+    ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更、比赛录入、审核与撤销都会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
   `;
   if (isAdmin()) {
     els.rosterFile = $('rosterFile');
@@ -989,15 +997,31 @@ async function submitMatch(e) {
     if (!currentUser || !currentProfile || currentProfile.is_banned) throw new Error('请先登录，并确保账号没有被封禁。');
     const a=profile(els.playerA.value), b=profile(els.playerB.value);
     const sa=Number(els.scoreA.value), sb=Number(els.scoreB.value);
+    const staffEntry = isStaff();
     if (!a || !b || a.id===b.id) throw new Error('请选择两名不同的选手。');
-    if (a.id!==currentUser.id && b.id!==currentUser.id) throw new Error('你只能提交自己参与的比赛。');
+    if (!staffEntry && a.id!==currentUser.id && b.id!==currentUser.id) throw new Error('你只能提交自己参与的比赛。');
     if (!Number.isInteger(sa)||!Number.isInteger(sb)||sa<0||sb<0||sa===sb) throw new Error('请输入有效比分，双方局数不能相同。');
     if (sa>99||sb>99) throw new Error('比分不能超过 99。');
-    const payload={played_at:new Date(els.matchDate.value).toISOString(),competition_id:els.competitionType.value,player_a_id:a.id,player_b_id:b.id,score_a:sa,score_b:sb,submitted_by:currentUser.id,status:'pending_opponent'};
-    const {error}=await supabaseClient.from('matches').insert(payload);
-    if (error) throw error;
-    showToast(`${a.real_name} ${sa}:${sb} ${b.real_name} 已提交，等待对手确认。`);
-    els.matchForm.reset(); setDefaultDate(); els.scoreA.value=4; els.scoreB.value=0; refreshData(); navigate('history');
+    const playedAt = new Date(els.matchDate.value).toISOString();
+    if (staffEntry) {
+      const { error } = await supabaseClient.rpc('staff_add_match', {
+        p_played_at: playedAt,
+        p_competition_id: els.competitionType.value,
+        p_player_a_id: a.id,
+        p_player_b_id: b.id,
+        p_score_a: sa,
+        p_score_b: sb
+      });
+      if (error) throw error;
+      showToast(`${a.real_name} ${sa}:${sb} ${b.real_name} 已由管理员录入并立即计入积分。`);
+    } else {
+      const payload={played_at:playedAt,competition_id:els.competitionType.value,player_a_id:a.id,player_b_id:b.id,score_a:sa,score_b:sb,submitted_by:currentUser.id,status:'pending_opponent'};
+      const {error}=await supabaseClient.from('matches').insert(payload);
+      if (error) throw error;
+      showToast(`${a.real_name} ${sa}:${sb} ${b.real_name} 已提交，等待对手确认。`);
+    }
+    els.matchForm.reset(); setDefaultDate(); els.scoreA.value=4; els.scoreB.value=0;
+    await refreshData(); navigate('history');
   } catch (err) { showToast(err.message || '提交失败。','error'); }
 }
 
