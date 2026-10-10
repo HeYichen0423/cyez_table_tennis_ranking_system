@@ -100,7 +100,7 @@
     </section>
 
     <section class="view" id="view-ranking">
-      <div class="page-header"><div><div class="eyebrow">LEADERBOARD</div><h1>排行榜</h1><p>积分越高，代表系统记录的相对竞技水平越高。</p></div><div class="header-controls"><input class="search-input" id="rankingSearch" placeholder="搜索选手…"><button class="btn btn-primary" id="exportRankingBtn">导出排名</button></div></div>
+      <div class="page-header"><div><div class="eyebrow">LEADERBOARD</div><h1>排行榜</h1><p>积分越高，代表系统记录的相对竞技水平越高。</p></div><div class="header-controls"><input class="search-input" id="rankingSearch" placeholder="搜索选手…"><button class="btn btn-primary" id="exportRankingBtn">导出为 CSV</button></div></div>
       <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>选手</th><th>积分</th><th>场次</th><th>胜-负</th><th>胜率</th><th>状态</th><th>赛事</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div>
     </section>
 
@@ -125,7 +125,7 @@
       <div class="card message-board-compose" id="messageBoardCompose">
         <div class="card-head"><div><h2>发表留言</h2><span class="muted" id="messageBoardQuota">登录后可留言。</span></div></div>
         <form id="messageBoardForm" class="message-form">
-          <textarea id="messageBoardContent" maxlength="1000" rows="3" placeholder="写点什么吧……" required></textarea>
+          <div class="mention-input-wrap"><textarea id="messageBoardContent" maxlength="1000" rows="1" placeholder="写点什么吧…… 输入 @ 选择选手" required></textarea><div id="messageMentionSuggestions" class="mention-suggestions" hidden></div></div>
           <div class="message-form-options">
             <label class="checkbox-line"><input type="checkbox" id="messageBoardAnonymous"><span>匿名发布</span></label>
             <span class="muted" id="messageBoardMentionHint">在留言中输入 @用户名，可以提醒对应选手。</span>
@@ -161,7 +161,7 @@
           <div class="card-head"><div><h2>赛事列表</h2><span class="muted">实时同步</span></div></div>
           <div class="tournament-filters">
             <input id="tournamentSearch" class="search-input full-width" placeholder="搜索赛事…">
-            <select id="tournamentFormatFilter" class="full-width"><option value="all">全部赛制</option><option value="group_knockout">小组循环 + 淘汰赛制</option><option value="single_elim">单败淘汰制</option><option value="double_elim">双败淘汰制</option></select>
+            <select id="tournamentFormatFilter" class="full-width"><option value="all">全部赛制</option><option value="none">无（管理员直接录入比赛）</option><option value="group_knockout">小组循环 + 淘汰赛制</option><option value="single_elim">单败淘汰制</option><option value="double_elim">双败淘汰制</option></select>
             <select id="tournamentPlayerFilter" class="full-width"><option value="">所有选手</option></select>
           </div>
           <div id="tournamentList" class="tournament-list"></div>
@@ -188,7 +188,7 @@
         <div class="form-grid">
           <div class="field"><label for="tournamentCompetition">赛事级别</label><select id="tournamentCompetition" required><option value="friendly_new">友谊赛（0.3）</option><option value="monthly" selected>月赛（0.5）</option><option value="small_qualifier">小赛预选赛（0.6）</option><option value="club_new">社团赛（0.7）</option><option value="major_qualifier">大赛预选赛（0.7）</option><option value="district_city">区赛 / 市赛（0.8）</option><option value="special">专项赛（1.0）</option></select></div>
           <div class="field"><label for="tournamentStart">开始时间</label><input id="tournamentStart" type="datetime-local" required></div>
-          <div class="field"><label for="tournamentFormat">赛制</label><select id="tournamentFormat" required><option value="group_knockout">小组循环 + 淘汰赛制</option><option value="single_elim">单败淘汰制</option><option value="double_elim">双败淘汰制</option></select></div>
+          <div class="field"><label for="tournamentFormat">赛制</label><select id="tournamentFormat" required><option value="none">无（管理员直接录入比赛）</option><option value="group_knockout">小组循环 + 淘汰赛制</option><option value="single_elim">单败淘汰制</option><option value="double_elim">双败淘汰制</option></select></div>
           <div class="field"><label for="tournamentGroupCount">小组数量</label><select id="tournamentGroupCount"><option value="2">2 组</option><option value="3">3 组</option><option value="4" selected>4 组</option><option value="5">5 组</option><option value="6">6 组</option><option value="8">8 组</option></select></div>
           <div class="field"><label for="tournamentAdvance">每组晋级</label><select id="tournamentAdvance"><option value="1">1 人</option><option value="2" selected>2 人</option><option value="3">3 人</option></select></div>
         </div>
