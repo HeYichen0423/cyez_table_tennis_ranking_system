@@ -247,7 +247,7 @@ function rankingRows() {
 
 function populateCompetition() {
   els.competitionType.innerHTML = Object.values(COMPETITIONS).filter(c => c.visible !== false).map(c => `<option value="${c.id}">${esc(c.name)}（${c.weight}）</option>`).join('');
-  els.competitionType.value = 'special';
+  els.competitionType.value = 'friendly_new';
 }
 function setDefaultDate() {
   const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
@@ -524,6 +524,63 @@ function renderMessageBoard() {
   }
 }
 
+let mentionTarget = null;
+let mentionMatches = [];
+let mentionActiveIndex = 0;
+function closeMentionSuggestions() {
+  const box = $('messageMentionSuggestions');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  mentionTarget = null; mentionMatches = []; mentionActiveIndex = 0;
+}
+function updateMentionSuggestions(input) {
+  if (!input || !(input.id === 'messageBoardContent' || !!input.closest('[data-comment-form]'))) return closeMentionSuggestions();
+  const caret = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, caret);
+  const match = before.match(/(?:^|\s)@([a-zA-Z0-9_.-]*)$/);
+  if (!match) return closeMentionSuggestions();
+  const query = match[1].toLowerCase();
+  mentionMatches = state.profiles.filter(p => !p.is_banned && p.id !== currentUser?.id && (!query || p.username.toLowerCase().includes(query) || p.real_name.toLowerCase().includes(query))).sort((a,b)=>a.real_name.localeCompare(b.real_name,'zh-CN')).slice(0,80);
+  if (!mentionMatches.length) return closeMentionSuggestions();
+  mentionTarget = input; mentionActiveIndex = 0;
+  let box = input.parentElement.querySelector('.mention-suggestions');
+  if (!box) {
+    box = document.createElement('div'); box.className = 'mention-suggestions'; input.parentElement.appendChild(box);
+  }
+  box.innerHTML = mentionMatches.map((p,i)=>`<button type="button" class="mention-option ${i===0?'active':''}" data-mention-index="${i}"><strong>${esc(p.real_name)}</strong><span>@${esc(p.username)}</span></button>`).join('');
+  box.hidden = false;
+}
+function chooseMention(index) {
+  if (!mentionTarget || !mentionMatches[index]) return;
+  const input = mentionTarget, p = mentionMatches[index], caret = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, caret), after = input.value.slice(input.selectionEnd ?? caret);
+  const match = before.match(/(?:^|\s)@([a-zA-Z0-9_.-]*)$/);
+  if (!match) return closeMentionSuggestions();
+  const tokenStart = before.length - match[1].length - 1;
+  const insert = `@${p.username} `;
+  input.value = before.slice(0, tokenStart) + insert + after;
+  const next = tokenStart + insert.length; input.focus(); input.setSelectionRange(next, next);
+  closeMentionSuggestions();
+}
+function setupMentionAutocomplete() {
+  document.addEventListener('input', e => { if (e.target.id === 'messageBoardContent' || !!e.target.closest('[data-comment-form]')) updateMentionSuggestions(e.target); });
+  document.addEventListener('keydown', e => {
+    if (!mentionTarget || !mentionMatches.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); mentionActiveIndex = (mentionActiveIndex + (e.key === 'ArrowDown' ? 1 : -1) + mentionMatches.length) % mentionMatches.length;
+      const box = mentionTarget.parentElement.querySelector('.mention-suggestions');
+      box?.querySelectorAll('.mention-option').forEach((el,i)=>{el.classList.toggle('active',i===mentionActiveIndex); if(i===mentionActiveIndex)el.scrollIntoView({block:'nearest'});});
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      const box = mentionTarget.parentElement.querySelector('.mention-suggestions');
+      if (box && !box.hidden) { e.preventDefault(); chooseMention(mentionActiveIndex); }
+    } else if (e.key === 'Escape') closeMentionSuggestions();
+  });
+  document.addEventListener('pointerdown', e => {
+    const option = e.target.closest('[data-mention-index]');
+    if (option) { e.preventDefault(); chooseMention(Number(option.dataset.mentionIndex)); return; }
+    if (!e.target.closest('.mention-input-wrap, .message-comment-form')) closeMentionSuggestions();
+  });
+}
+
 async function submitMessageBoard(e) {
   e.preventDefault();
   try {
@@ -650,29 +707,23 @@ async function saveInitialRating(userId) {
   } catch(e){showToast(e.message||'初始积分修改失败。','error');}
 }
 
-async function exportRanking() {
+function exportRanking() {
   try {
-    await ensureXlsxLoaded();
     const rows = rankingRows();
-    const data = [
-      ['排名', '真实姓名', '积分'],
-      ...rows.map((r, i) => [i + 1, r.real_name, Number(Number(r.rating).toFixed(1))])
+    const quote = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const lines = [
+      ['排名', '真实姓名', '积分', '总胜负数'].map(quote).join(','),
+      ...rows.map((r, i) => [i + 1, r.real_name, Number(Number(r.rating).toFixed(1)), `${r.wins}-${r.losses}`].map(quote).join(','))
     ];
-    const ws = window.XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [
-      { wch: 10 },
-      { wch: 18 },
-      { wch: 12 }
-    ];
-    const wb = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(wb, ws, '排行榜');
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
     const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    window.XLSX.writeFile(wb, `CYEZ乒乓球排行榜-${y}${m}${day}.xlsx`);
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+    a.href = url; a.download = `CYEZ乒乓球排行榜-${y}${m}${day}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   } catch (e) {
-    showToast(e.message || '排名导出失败，请稍后重试。', 'error');
+    showToast(e.message || 'CSV 排名导出失败，请稍后重试。', 'error');
   }
 }
 
@@ -1307,6 +1358,7 @@ function bindEvents() {
   els.loginForm.addEventListener('submit',async e=>{e.preventDefault();try{await signIn();}catch(err){showToast(err.message||'登录失败。','error');}});
   els.signupForm.addEventListener('submit',async e=>{e.preventDefault();try{await signUp();}catch(err){showToast(err.message||'注册失败。','error');}});
   els.messageBoardForm?.addEventListener('submit',submitMessageBoard);
+  setupMentionAutocomplete();
   document.addEventListener('submit',e=>{const form=e.target.closest('[data-comment-form]'); if(form){e.preventDefault(); submitMessageBoardComment(form);}});
   els.profileClose.addEventListener('click',()=>closeProfile());
   installBackdropClose(els.profileBackdrop, ()=>closeProfile());
