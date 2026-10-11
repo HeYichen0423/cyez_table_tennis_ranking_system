@@ -15,6 +15,15 @@ create table if not exists public.profiles (
   username text not null unique check (username = lower(username) and char_length(username) between 3 and 24),
   role text not null default 'player' check (role in ('player','moderator','admin')),
   is_banned boolean not null default false,
+  -- 初始积分：选手开始比赛前可由管理员设定；一旦有生效比赛即锁定。
+  initial_rating numeric(6,1) not null default 1500,
+  -- 是否已通过学校大名单核验，以及核验时间。
+  school_verified boolean not null default false,
+  roster_verified_at timestamptz,
+  -- 姓名归一化键，用于和学校大名单比对；避免同音/空格差异导致漏配。
+  real_name_key text,
+  -- 管理员重置密码后置为 true，用户首次登录必须修改密码。
+  password_change_required boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -32,7 +41,7 @@ create table if not exists public.matches (
   player_b_id uuid not null references public.profiles(id),
   score_a integer not null check (score_a >= 0 and score_a <= 99),
   score_b integer not null check (score_b >= 0 and score_b <= 99),
-  competition_id text not null check (competition_id in ('friendly','club','school_qualifier','district_qualifier','school_official')),
+  competition_id text not null check (competition_id in ('friendly_new','monthly','small_qualifier','club_new','major_qualifier','district_city','special','friendly','club','school_qualifier','district_qualifier','school_official')),
   submitted_by uuid not null references public.profiles(id),
   status text not null default 'pending_opponent' check (status in ('pending_opponent','approved','rejected','cancelled')),
   opponent_confirmed_at timestamptz,
@@ -40,6 +49,10 @@ create table if not exists public.matches (
   reviewed_at timestamptz,
   created_at timestamptz not null default now(),
   note text,
+  -- 比赛来源：手动录入或由赛事系统自动写入。
+  source_type text not null default 'manual',
+  tournament_id uuid,
+  tournament_match_id uuid,
   constraint match_players_distinct check (player_a_id <> player_b_id),
   constraint match_score_distinct check (score_a <> score_b),
   constraint match_submitter_is_participant check (submitted_by = player_a_id or submitted_by = player_b_id)
@@ -315,8 +328,12 @@ revoke all on table public.profiles from anon, authenticated;
 revoke all on table public.matches from anon, authenticated;
 revoke all on table public.audit_logs from anon, authenticated;
 
-grant select on table public.profiles to anon, authenticated;
-grant select, insert, update on table public.profiles to authenticated;
+-- profiles：榜单需要访客读取基础资料，但 initial_rating / school_verified /
+-- real_name_key / password_change_required 等字段不应暴露给匿名请求。
+-- 因此 anon 只授予公开列，登录用户仍可读取完整资料。
+grant select (id, real_name, username, role, is_banned, created_at) on table public.profiles to anon;
+grant select on table public.profiles to authenticated;
+grant insert, update on table public.profiles to authenticated;
 grant select, insert, update on table public.matches to authenticated;
 grant select on table public.matches to anon;
 grant select on table public.audit_logs to authenticated;
@@ -417,3 +434,134 @@ $$;
 -- =========================
 -- 注册第一个账号后，在 SQL Editor 执行：
 -- update public.profiles set role = 'admin' where username = '你的用户名';
+
+-- =========================
+-- 11) 赛事 / 通知 / 留言板（与线上部署同步）
+-- =========================
+-- 说明：以下表已经部署在线上 Supabase 项目中被前端使用，但历史上没有纳入本文件。
+-- 这里补齐表结构，使仓库可以作为“数据库结构”的参考来源。
+-- 注意：相关 Edge Functions（register-student、admin-create-user、admin-reset-password、
+-- change-own-password、change-own-username 等）与部分 RPC 函数体仍只存在于线上，
+-- 若要从零重建数据库，请先从线上导出函数定义，不要只依赖本文件。
+
+create table if not exists public.tournaments (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(trim(name)) between 1 and 80),
+  competition_id text not null,
+  format text not null default 'none' check (format in ('none','group_knockout','single_elim','double_elim')),
+  status text not null default 'in_progress' check (status in ('draft','in_progress','completed','cancelled')),
+  start_at timestamptz not null default now(),
+  group_count integer not null default 0 check (group_count >= 0),
+  advance_per_group integer not null default 1 check (advance_per_group >= 1),
+  created_by uuid references public.profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.tournament_entries (
+  tournament_id uuid not null references public.tournaments(id) on delete cascade,
+  player_id uuid not null references public.profiles(id) on delete cascade,
+  seed integer,
+  group_no integer,
+  slot_no integer,
+  created_at timestamptz not null default now(),
+  primary key (tournament_id, player_id)
+);
+
+create table if not exists public.tournament_matches (
+  id uuid primary key default gen_random_uuid(),
+  tournament_id uuid not null references public.tournaments(id) on delete cascade,
+  bracket_key text not null,
+  stage text not null check (stage in ('group','knockout','winners','losers','final')),
+  round_no integer not null default 1,
+  match_no integer not null default 1,
+  group_no integer,
+  label text,
+  player_a_id uuid references public.profiles(id),
+  player_b_id uuid references public.profiles(id),
+  score_a integer check (score_a >= 0 and score_a <= 99),
+  score_b integer check (score_b >= 0 and score_b <= 99),
+  status text not null default 'scheduled' check (status in ('scheduled','completed','bye','cancelled')),
+  winner_id uuid references public.profiles(id),
+  next_match_id uuid,
+  next_slot integer,
+  next_loss_match_id uuid,
+  next_loss_slot integer,
+  rating_match_id uuid references public.matches(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.notifications (
+  id bigint generated by default as identity primary key,
+  recipient_id uuid not null references public.profiles(id) on delete cascade,
+  type text not null,
+  title text,
+  body text,
+  match_id uuid references public.matches(id) on delete set null,
+  tournament_id uuid references public.tournaments(id) on delete set null,
+  message_post_id uuid,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.message_board_posts (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid references public.profiles(id) on delete set null,
+  content text not null,
+  is_anonymous boolean not null default false,
+  is_pinned boolean not null default false,
+  pinned_at timestamptz,
+  expires_at timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.message_board_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.message_board_posts(id) on delete cascade,
+  author_id uuid references public.profiles(id) on delete set null,
+  content text not null,
+  deleted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists tournaments_start_idx on public.tournaments(start_at desc);
+create index if not exists tournament_entries_player_idx on public.tournament_entries(player_id);
+create index if not exists tournament_matches_tournament_idx on public.tournament_matches(tournament_id);
+create index if not exists notifications_recipient_idx on public.notifications(recipient_id, created_at desc);
+create index if not exists message_board_posts_created_idx on public.message_board_posts(created_at desc);
+create index if not exists message_board_comments_post_idx on public.message_board_comments(post_id);
+
+alter table public.tournaments enable row level security;
+alter table public.tournament_entries enable row level security;
+alter table public.tournament_matches enable row level security;
+alter table public.notifications enable row level security;
+alter table public.message_board_posts enable row level security;
+alter table public.message_board_comments enable row level security;
+
+-- 赛事与留言板的内容对所有访客可读；写入统一走带鉴权的 RPC / Edge Function。
+drop policy if exists tournaments_public_read on public.tournaments;
+create policy tournaments_public_read on public.tournaments for select to anon, authenticated using (true);
+
+drop policy if exists tournament_entries_public_read on public.tournament_entries;
+create policy tournament_entries_public_read on public.tournament_entries for select to anon, authenticated using (true);
+
+drop policy if exists tournament_matches_public_read on public.tournament_matches;
+create policy tournament_matches_public_read on public.tournament_matches for select to anon, authenticated using (true);
+
+-- 通知只允许收件人自己读取和标记已读。
+drop policy if exists notifications_self_read on public.notifications;
+create policy notifications_self_read on public.notifications for select to authenticated using (recipient_id = (select auth.uid()));
+
+drop policy if exists notifications_self_update on public.notifications;
+create policy notifications_self_update on public.notifications for update to authenticated
+  using (recipient_id = (select auth.uid()))
+  with check (recipient_id = (select auth.uid()));
+
+-- 留言板读走 RPC（message_board_list 等）；表本身不直接对客户端开放写入。
+drop policy if exists message_board_posts_read on public.message_board_posts;
+create policy message_board_posts_read on public.message_board_posts for select to anon, authenticated using (true);
+
+drop policy if exists message_board_comments_read on public.message_board_comments;
+create policy message_board_comments_read on public.message_board_comments for select to anon, authenticated using (true);
