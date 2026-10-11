@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+package-lock.json
+
+# 本地测试 / 探测脚本（可能含账号口令与 token，绝不能提交）
+.sectest/
+*.token
+token.txt
+
+# 学校大名单等含个人信息的表格
+*.xlsx
+学生信息表.xlsx
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 部署临时文件
+*.log

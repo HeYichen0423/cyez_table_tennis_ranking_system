@@ -8,25 +8,16 @@ const supabaseClient = isConfigured ? createClient(CONFIG.url, CONFIG.anonKey, {
   auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true }
 }) : null;
 
-const INITIAL_RATING = 1500;
-const K = 32;
-const COMPETITIONS = {
-  // 新规则：这些 ID 用于今后新录入的比赛。
-  friendly_new: { id: 'friendly_new', name: '友谊赛', weight: 0.3 },
-  monthly: { id: 'monthly', name: '月赛', weight: 0.5 },
-  small_qualifier: { id: 'small_qualifier', name: '小赛预选赛', weight: 0.6 },
-  club_new: { id: 'club_new', name: '社团赛', weight: 0.7 },
-  major_qualifier: { id: 'major_qualifier', name: '大赛预选赛', weight: 0.7 },
-  district_city: { id: 'district_city', name: '区赛 / 市赛', weight: 0.8 },
-  special: { id: 'special', name: '专项赛', weight: 1.0 },
-
-  // 兼容历史记录：旧 ID 继续使用原来的权重，避免规则升级后历史积分被悄悄改变。
-  legacy_friendly: { id: 'legacy_friendly', name: '历史：友谊赛', weight: 0.2, visible: false },
-  legacy_club: { id: 'legacy_club', name: '历史：社团组织比赛', weight: 0.5, visible: false },
-  legacy_school_qualifier: { id: 'legacy_school_qualifier', name: '历史：校级比赛预选赛', weight: 0.5, visible: false },
-  legacy_district_qualifier: { id: 'legacy_district_qualifier', name: '历史：区赛 / 市赛预选赛', weight: 0.8, visible: false },
-  legacy_school_official: { id: 'legacy_school_official', name: '历史：校级正式比赛', weight: 1.0, visible: false }
-};
+const RatingCore = window.CYEZRatingCore;
+const INITIAL_RATING = RatingCore.INITIAL_RATING;
+const K = RatingCore.K;
+const COMPETITIONS = RatingCore.COMPETITIONS;
+// 积分算法统一由 rating-core.js 提供，前端只负责展示与调用，避免多处实现漂移。
+const competition = RatingCore.competition;
+const expectedScore = RatingCore.expectedScore;
+const scoreMultiplier = RatingCore.scoreMultiplier;
+const calculateDelta = RatingCore.calculateDelta;
+const sortMatches = RatingCore.sortMatches;
 const STATUS_NAMES = {
   pending_opponent: '待对手确认',
   approved: '已生效',
@@ -157,79 +148,25 @@ function formatRating(n) { return Number(n || 0).toFixed(1); }
 function formatDate(v) { return new Date(v).toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 function formatDateLong(v) { return new Date(v).toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 function formatPct(n) { return `${(Number(n || 0) * 100).toFixed(1)}%`; }
-function competition(id) {
-  const direct = COMPETITIONS[id];
-  if (direct) return direct;
-  const legacyMap = {
-    friendly: COMPETITIONS.legacy_friendly,
-    club: COMPETITIONS.legacy_club,
-    school_qualifier: COMPETITIONS.legacy_school_qualifier,
-    district_qualifier: COMPETITIONS.legacy_district_qualifier,
-    school_official: COMPETITIONS.legacy_school_official
-  };
-  return legacyMap[id] || { name: id || '未知', weight: 0 };
-}
 function profile(id) { return state.profiles.find(p => p.id === id); }
 function activeProfiles() { return state.profiles.filter(p => !p.is_banned); }
 function isStaff() { return !!currentProfile && !currentProfile.is_banned && ['admin','moderator'].includes(currentProfile.role); }
 function isAdmin() { return !!currentProfile && !currentProfile.is_banned && currentProfile.role === 'admin'; }
 function playerLabel(id) { const p = profile(id); return p ? p.real_name : '未知选手'; }
 
-function expectedScore(myRating, opponentRating) {
-  return 1 / (1 + Math.pow(10, (opponentRating - myRating) / 400));
-}
-function scoreMultiplier(w, l) {
-  const total = w + l;
-  if (w <= l || total <= 0) return 0;
-  const closeness = Math.pow((w - l) / total, 0.65);
-  const length = Math.pow(Math.log(1 + total) / Math.log(5), 0.35);
-  return Math.min(1.5, 0.70 + 0.80 * closeness * length);
-}
-function calculateDelta(winnerRating, loserRating, winnerScore, loserScore, weight) {
-  const e = expectedScore(winnerRating, loserRating);
-  const m = scoreMultiplier(winnerScore, loserScore);
-  // 积分统一按 0.1 分为最小单位；同一场比赛双方加减同一个已舍入变化量，保持零和。
-  const delta = Math.round((K * weight * m * (1 - e)) * 10) / 10;
-  return { e, m, delta };
-}
-
-function sortMatches(ms) {
-  return [...ms].sort((a,b) => new Date(a.played_at) - new Date(b.played_at)
-    || new Date(a.created_at) - new Date(b.created_at)
-    || a.id.localeCompare(b.id));
-}
 
 function rebuildRatings() {
-  state.ratings = new Map(state.profiles.map(p => [p.id, Number(Number(p.initial_rating ?? INITIAL_RATING).toFixed(1))]));
-  state.games = new Map(state.profiles.map(p => [p.id, 0]));
-  state.wins = new Map(state.profiles.map(p => [p.id, 0]));
-  state.losses = new Map(state.profiles.map(p => [p.id, 0]));
-  state.approvedMatches = sortMatches(state.matches.filter(m => m.status === 'approved'));
-  for (const m of state.approvedMatches) {
-    const aRating = state.ratings.get(m.player_a_id) ?? INITIAL_RATING;
-    const bRating = state.ratings.get(m.player_b_id) ?? INITIAL_RATING;
-    const aWon = Number(m.score_a) > Number(m.score_b);
-    const winnerId = aWon ? m.player_a_id : m.player_b_id;
-    const loserId = aWon ? m.player_b_id : m.player_a_id;
-    const winnerRating = aWon ? aRating : bRating;
-    const loserRating = aWon ? bRating : aRating;
-    const winnerScore = aWon ? Number(m.score_a) : Number(m.score_b);
-    const loserScore = aWon ? Number(m.score_b) : Number(m.score_a);
-    const calc = calculateDelta(winnerRating, loserRating, winnerScore, loserScore, competition(m.competition_id).weight);
-    m._winnerId = winnerId;
-    m._delta = calc.delta;
-    m._preRatingWinner = winnerRating;
-    m._preRatingLoser = loserRating;
-    m._expectedWinner = calc.e;
-    m._multiplier = calc.m;
-    state.ratings.set(winnerId, winnerRating + calc.delta);
-    state.ratings.set(loserId, loserRating - calc.delta);
-    state.games.set(m.player_a_id, (state.games.get(m.player_a_id) || 0) + 1);
-    state.games.set(m.player_b_id, (state.games.get(m.player_b_id) || 0) + 1);
-    state.wins.set(winnerId, (state.wins.get(winnerId) || 0) + 1);
-    state.losses.set(loserId, (state.losses.get(loserId) || 0) + 1);
-  }
-  window.CYEZ_EXTERNAL_RATINGS = Object.fromEntries([...state.ratings.entries()]);
+  // 复用 rating-core.js 的纯函数回放逻辑；app.js 不再自带一份实现。
+  const result = RatingCore.replayRatings(
+    state.profiles,
+    state.matches.filter(m => m.status === 'approved'),
+    competition
+  );
+  state.ratings = result.ratings;
+  state.games = result.games;
+  state.wins = result.wins;
+  state.losses = result.losses;
+  state.approvedMatches = result.approvedMatches;
 }
 
 function rankingRows() {
@@ -650,7 +587,7 @@ function renderAccountBanner() {
     return;
   }
   const me = rankingRows().find(r=>r.id===currentProfile.id);
-  const pending = state.matches.filter(m=>m.status==='pending_opponent' && m.player_a_id!==currentProfile.id && m.player_b_id!==currentProfile.id ? false : (m.status==='pending_opponent' && (m.submitted_by===currentProfile.id || m.player_a_id===currentProfile.id || m.player_b_id===currentProfile.id))).length;
+  const pending = state.matches.filter(m => m.status==='pending_opponent' && (m.submitted_by===currentProfile.id || m.player_a_id===currentProfile.id || m.player_b_id===currentProfile.id)).length;
   els.accountBanner.innerHTML = `<div><strong>你好，${esc(currentProfile.real_name)}</strong><span> ${currentProfile.role==='admin'?'管理员':currentProfile.role==='moderator'?'副管理员':'选手'} · 当前积分 <b>${formatRating(me?.rating??INITIAL_RATING)}</b> · ${me?.games||0} 场比赛${pending?' · 待处理 '+pending+' 场':''}</span></div><button class="btn btn-ghost" id="bannerProfileBtn">我的账号</button>`;
 }
 
@@ -755,9 +692,8 @@ async function importStudentRoster(file) {
   if (!file) return;
   try {
     await ensureXlsxLoaded();
-    if (!/\.xlsx$/i.test(file.name)) throw new Error('请上传名为 student_info.xlsx 的 Excel 文件。');
-    if (file.name !== 'student_info.xlsx') throw new Error('请上传文件名为 student_info.xlsx 的大名单。');
-    els.rosterImportStatus.textContent='正在读取 student_info.xlsx…';
+    if (!/\.xlsx$/i.test(file.name)) throw new Error('请上传 .xlsx 格式的学生大名单。');
+    els.rosterImportStatus.textContent=`正在读取 ${file.name}…`;
     const buf=await file.arrayBuffer();
     const wb=window.XLSX.read(buf,{type:'array'});
     const sheet=wb.Sheets[wb.SheetNames[0]];
@@ -786,6 +722,8 @@ function renderAdmin() {
   if (!isStaff()) { els.adminContent.innerHTML='<div class="card empty">你没有访问管理后台的权限。</div>'; return; }
   const pending = state.matches.filter(m=>m.status==='pending_opponent').sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const rows = state.profiles.slice().sort((a,b)=>a.real_name.localeCompare(b.real_name,'zh-CN'));
+  // 一次性建立 id -> 排名行 的映射，避免在表格每一行里重复调用 rankingRows()（O(n^2)）。
+  const ratingById = new Map(rankingRows().map(r=>[r.id,r]));
   els.adminContent.innerHTML = `
     <div class="stats-grid admin-stats">
       <div class="stat-card"><div class="stat-label">待审核/确认</div><div class="stat-value">${pending.length}</div></div>
@@ -794,8 +732,8 @@ function renderAdmin() {
       <div class="stat-card"><div class="stat-label">封禁账号</div><div class="stat-value">${state.profiles.filter(p=>p.is_banned).length}</div></div>
     </div>
     <div class="card"><div class="card-head"><div><h2>待处理比赛</h2><span class="muted">副管理员和管理员可以审核；参赛对手可以确认。</span></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>提交时间</th><th>比赛</th><th>比分</th><th>级别</th><th>提交人</th><th>操作</th></tr></thead><tbody>${pending.map(m=>`<tr><td>${formatDate(m.created_at)}</td><td class="name-cell">${esc(playerLabel(m.player_a_id))} vs ${esc(playerLabel(m.player_b_id))}</td><td><strong>${m.score_a}:${m.score_b}</strong></td><td>${esc(competition(m.competition_id).name)}</td><td>${esc(playerLabel(m.submitted_by))}</td><td>${matchActionHtml(m)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">没有待处理比赛。</div></td></tr>'}</tbody></table></div></div>
-    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以直接创建账号、封禁账号、设置初始积分、添加/取消副管理员、为用户重置密码。初始积分只建议在选手开始比赛前设置。</span></div><div><button class="btn btn-primary" data-admin-create-user>＋ 直接创建账号</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>当前积分</th><th>初始积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=rankingRows().find(x=>x.id===p.id);const self=currentUser?.id===p.id;const games=state.games.get(p.id)||0;const canSet=isAdmin()&&games===0&&!p.is_banned;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td>${isAdmin()?`<div class="inline-edit"><input class="initial-rating-input" data-initial-rating="${p.id}" type="number" step="0.1" value="${Number(p.initial_rating??INITIAL_RATING).toFixed(1)}" ${canSet?'':'disabled'}><button class="text-btn" data-save-initial-rating="${p.id}" ${canSet?'':'disabled'}>保存</button></div>${games>0?'<div class="muted">已有生效比赛，已锁定</div>':''}`:formatRating(p.initial_rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="8"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
-    ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>学校学生大名单</h2><span class="muted">上传 student_info.xlsx，仅管理员可导入；名单不会展示给普通用户。注册时由服务器核对“学生姓名”。</span></div></div><div class="roster-import"><input id="rosterFile" type="file" accept=".xlsx" /><div id="rosterImportStatus" class="muted">请选择 student_info.xlsx。</div></div></div>`:''}
+    <div class="card"><div class="card-head"><div><h2>账号管理</h2><span class="muted">管理员可以直接创建账号、封禁账号、设置初始积分、添加/取消副管理员、为用户重置密码。初始积分只建议在选手开始比赛前设置。</span></div><div><button class="btn btn-primary" data-admin-create-user>＋ 直接创建账号</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>真实姓名</th><th>用户名</th><th>角色</th><th>当前积分</th><th>初始积分</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const r=ratingById.get(p.id);const self=currentUser?.id===p.id;const games=state.games.get(p.id)||0;const canSet=isAdmin()&&games===0&&!p.is_banned;return `<tr><td class="name-cell">${esc(p.real_name)}</td><td>@${esc(p.username)}</td><td><span class="pill">${p.role==='admin'?'管理员':p.role==='moderator'?'副管理员':'选手'}</span></td><td>${formatRating(r?.rating??INITIAL_RATING)}</td><td>${isAdmin()?`<div class="inline-edit"><input class="initial-rating-input" data-initial-rating="${p.id}" type="number" step="0.1" value="${Number(p.initial_rating??INITIAL_RATING).toFixed(1)}" ${canSet?'':'disabled'}><button class="text-btn" data-save-initial-rating="${p.id}" ${canSet?'':'disabled'}>保存</button></div>${games>0?'<div class="muted">已有生效比赛，已锁定</div>':''}`:formatRating(p.initial_rating??INITIAL_RATING)}</td><td><span class="pill ${p.is_banned?'off':'active'}">${p.is_banned?'封禁':'正常'}</span></td><td>${formatDateLong(p.created_at)}</td><td>${isAdmin()&&!self?`<select class="admin-role-select" data-role-user="${p.id}"><option value="player" ${p.role==='player'?'selected':''}>选手</option><option value="moderator" ${p.role==='moderator'?'selected':''}>副管理员</option></select> <button class="text-btn ${p.is_banned?'':'danger-text'}" data-ban-user="${p.id}">${p.is_banned?'解封':'封禁'}</button> <button class="text-btn" data-reset-password="${p.id}">重置密码</button> <button class="text-btn danger-text" data-delete-user="${p.id}">永久删除</button>`:'—'}</td></tr>`;}).join('')||'<tr><td colspan="8"><div class="empty">没有账号。</div></td></tr>'}</tbody></table></div></div>
+    ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>学校学生大名单</h2><span class="muted">上传学生大名单（.xlsx，需包含“学生姓名”列），仅管理员可导入；名单不会展示给普通用户。注册时由服务器核对“学生姓名”。</span></div></div><div class="roster-import"><input id="rosterFile" type="file" accept=".xlsx" /><div id="rosterImportStatus" class="muted">请选择学生大名单（.xlsx）。</div></div></div>`:''}
     ${isAdmin()?`<div class="card"><div class="card-head"><div><h2>操作日志</h2><span class="muted">账号权限变更、比赛录入、审核与撤销都会记录。</span></div><button class="btn btn-ghost" id="refreshAuditBtn">刷新日志</button></div><div id="auditContent"><div class="empty">正在加载…</div></div></div>`:''}
   `;
   if (isAdmin()) {
@@ -973,16 +911,39 @@ async function fetchCurrentProfile() {
   }
 }
 
+// PostgREST 单次请求默认最多返回 1000 行；分页拉取可以避免比赛/选手超过上限后
+// 积分在排行榜上被静默算错。order 必须带上唯一列 id，保证分页稳定不重不漏。
+const SUPABASE_PAGE_SIZE = 1000;
+async function fetchAllRows(buildQuery) {
+  const rows = [];
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const { data, error } = await buildQuery().range(from, from + SUPABASE_PAGE_SIZE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < SUPABASE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 async function refreshData() {
   if (!supabaseClient) {
     renderUnconfigured();
     return;
   }
-  const [{data:profiles,error:pErr},{data:matches,error:mErr}] = await Promise.all([
-    supabaseClient.from('profiles').select('id,real_name,username,role,is_banned,created_at,initial_rating,school_verified').order('created_at',{ascending:true}),
-    supabaseClient.from('matches').select('*').order('played_at',{ascending:true})
+  // 排行榜与历史记录对访客即可见，但 initial_rating / school_verified 只在管理界面用到。
+  // 访客只取公开列，配合数据库列级授权，避免匿名请求批量拉走不该公开的字段。
+  const profileColumns = currentUser
+    ? 'id,real_name,username,role,is_banned,created_at,initial_rating,school_verified'
+    : 'id,real_name,username,role,is_banned,created_at';
+  const [profiles, matches] = await Promise.all([
+    fetchAllRows(() => supabaseClient.from('profiles')
+      .select(profileColumns)
+      .order('created_at',{ascending:true}).order('id',{ascending:true})),
+    fetchAllRows(() => supabaseClient.from('matches')
+      .select('*')
+      .order('played_at',{ascending:true}).order('created_at',{ascending:true}).order('id',{ascending:true}))
   ]);
-  if (pErr) throw pErr; if (mErr) throw mErr;
   state.profiles=profiles||[]; state.matches=matches||[];
   rebuildRatings(); refreshSelects(); renderDashboard(); renderRanking(); renderHistory(); renderAdmin(); updateAuthUi(); await loadNotifications(); await loadMessageBoard();
 }
@@ -1275,12 +1236,24 @@ async function saveProfile(e) {
   }
 }
 
+// profiles/matches 的每一次写入都会触发 postgres_changes；一次批量操作可能连发多个事件。
+// 这里做防抖合并，避免对同一个刷新动作重复执行全库重算与整页重渲染。
+const REALTIME_REFRESH_DEBOUNCE_MS = 400;
+let realtimeRefreshTimer = null;
+function scheduleRealtimeRefresh() {
+  if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+  realtimeRefreshTimer = setTimeout(() => {
+    realtimeRefreshTimer = null;
+    refreshData().catch(e => console.error(e));
+  }, REALTIME_REFRESH_DEBOUNCE_MS);
+}
+
 function setupRealtime() {
   if (!supabaseClient) return;
   if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
   realtimeChannel=supabaseClient.channel('cyez-live')
-    .on('postgres_changes',{event:'*',schema:'public',table:'profiles'},async()=>{try{await refreshData();}catch(e){console.error(e);}})
-    .on('postgres_changes',{event:'*',schema:'public',table:'matches'},async()=>{try{await refreshData();}catch(e){console.error(e);}})
+    .on('postgres_changes',{event:'*',schema:'public',table:'profiles'},scheduleRealtimeRefresh)
+    .on('postgres_changes',{event:'*',schema:'public',table:'matches'},scheduleRealtimeRefresh)
     .on('postgres_changes',{event:'*',schema:'public',table:'notifications'},async()=>{try{if(currentUser) await loadNotifications();}catch(e){console.error(e);}})
     .on('postgres_changes',{event:'*',schema:'public',table:'message_board_comments'},async()=>{try{await loadMessageBoard();}catch(e){console.error(e);}})
     .subscribe((status)=>{
@@ -1413,6 +1386,14 @@ function bindEvents() {
   els.historyFilter.addEventListener('change',renderHistory);
   els.h2hA.addEventListener('change',renderH2H); els.h2hB.addEventListener('change',renderH2H);
   document.addEventListener('change',e=>{const role=e.target.closest('[data-role-user]');if(role)updateRole(role.dataset.roleUser,role.value); const rf=e.target.closest('#rosterFile'); if(rf)importStudentRoster(rf.files?.[0]);});
+  // 按 Esc 关闭当前打开的弹窗；强制改密弹窗不能关闭，避免用户绕过首次改密。
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!els.authBackdrop.hidden) { closeAuth(); return; }
+    if (!els.adminCreateUserBackdrop.hidden) { closeAdminCreateUser(); return; }
+    if (!els.adminResetBackdrop.hidden) { closeAdminResetPassword(); return; }
+    if (!els.profileBackdrop.hidden && !passwordChangeRequired) { closeProfile(); return; }
+  });
   setupDraggableModals();
 }
 

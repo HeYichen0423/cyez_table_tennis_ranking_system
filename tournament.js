@@ -8,15 +8,13 @@
   const configured = CONFIG.url && !CONFIG.url.includes('YOUR-PROJECT') && CONFIG.anonKey && !CONFIG.anonKey.includes('YOUR_');
   const client = configured ? createClient(CONFIG.url, CONFIG.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
 
-  const TOURNAMENT_COMPETITIONS = {
-    friendly_new: { name: '友谊赛', weight: 0.3 },
-    monthly: { name: '月赛', weight: 0.5 },
-    small_qualifier: { name: '小赛预选赛', weight: 0.6 },
-    club_new: { name: '社团赛', weight: 0.7 },
-    major_qualifier: { name: '大赛预选赛', weight: 0.7 },
-    district_city: { name: '区赛 / 市赛', weight: 0.8 },
-    special: { name: '专项赛', weight: 1.0 }
-  };
+  // 赛事级别直接复用 rating-core.js 的权威权重表，避免两处维护导致权重不一致。
+  const RatingCore = window.CYEZRatingCore;
+  const TOURNAMENT_COMPETITIONS = Object.fromEntries(
+    Object.values(RatingCore.COMPETITIONS)
+      .filter(c => c.visible !== false)
+      .map(c => [c.id, { name: c.name, weight: c.weight }])
+  );
   const FORMAT_NAMES = { none: '无', group_knockout: '小组循环 + 淘汰赛制', single_elim: '单败淘汰制', double_elim: '双败淘汰制' };
   const STATUS_NAMES = { draft: '草稿', in_progress: '进行中', completed: '已结束', cancelled: '已取消', scheduled: '待进行', completed_match: '已结束', bye: '轮空' };
 
