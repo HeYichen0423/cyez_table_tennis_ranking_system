@@ -584,6 +584,11 @@ create policy message_board_comments_read on public.message_board_comments for s
 --
 -- 注意：线上可能已部署同名函数。覆盖前请先对比线上定义，避免丢失线上特有的推进逻辑；
 -- 若线上签名不同，本函数会作为重载存在，请以线上版本为准并仅补充 p_forfeit 参数。
+-- 本节可单独执行：先补齐 forfeit 列与约束（幂等），再替换函数。
+alter table public.tournament_matches add column if not exists forfeit text not null default 'none';
+alter table public.tournament_matches drop constraint if exists tournament_matches_forfeit_check;
+alter table public.tournament_matches add constraint tournament_matches_forfeit_check check (forfeit in ('none','a','b','both'));
+
 -- 旧版（如 3 参数版本）必须先删除：否则新旧签名会同时存在，PostgREST 调用时会报
 -- “Could not find the function ... in the schema cache” 之类的重载歧义错误。
 do $$
