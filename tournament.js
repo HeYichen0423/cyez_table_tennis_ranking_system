@@ -17,6 +17,10 @@
   );
   const FORMAT_NAMES = { none: '无', group_knockout: '小组循环 + 淘汰赛制', single_elim: '单败淘汰制', double_elim: '双败淘汰制' };
   const STATUS_NAMES = { draft: '草稿', in_progress: '进行中', completed: '已结束', cancelled: '已取消', scheduled: '待进行', completed_match: '已结束', bye: '轮空' };
+  // 弃权选项：none=正常比分；a=A 方弃权；b=B 方弃权；both=双方弃权。
+  // 只要有任何一方弃权，本场就不会写入积分比赛（不计入积分），但仍会记录胜负并推进签位。
+  const FORFEIT_NAMES = { none: '无弃权', a: 'A 方弃权', b: 'B 方弃权', both: '双方弃权' };
+  const forfeitLabel = v => (FORFEIT_NAMES[v] && v !== 'none') ? FORFEIT_NAMES[v] : '';
 
   const state = { tournaments: [], selectedId: null, entries: [], allEntries: [], matches: [], profiles: [], currentProfile: null, playerFilter: '', realtime: null, refreshTimer: null };
   const $ = id => document.getElementById(id);
@@ -218,8 +222,12 @@
       const map=new Map(rows.map(r=>[r.p.id,r]));
       state.matches.filter(m=>m.stage==='group' && m.group_no===gi+1 && m.status==='completed').forEach(m=>{
         const a=map.get(m.player_a_id),b=map.get(m.player_b_id);if(!a||!b)return;
-        a.gf+=Number(m.score_a);a.ga+=Number(m.score_b);a.diff=a.gf-a.ga;b.gf+=Number(m.score_b);b.ga+=Number(m.score_a);b.diff=b.gf-b.ga;
-        if(Number(m.score_a)>Number(m.score_b)){a.wins++;a.points+=1;b.losses++;}else{b.wins++;b.points+=1;a.losses++;}
+        const sa=Number(m.score_a||0),sb=Number(m.score_b||0);
+        a.gf+=sa;a.ga+=sb;a.diff=a.gf-a.ga;b.gf+=sb;b.ga+=sa;b.diff=b.gf-b.ga;
+        // 优先按 winner_id 判定（弃权场次没有比分）；双方弃权时两边都记负。
+        if(m.winner_id===m.player_a_id||(!m.winner_id&&sa>sb)){a.wins++;a.points+=1;b.losses++;}
+        else if(m.winner_id===m.player_b_id||(!m.winner_id&&sb>sa)){b.wins++;b.points+=1;a.losses++;}
+        else{a.losses++;b.losses++;}
       });
       rows.sort((a,b)=>b.wins-a.wins||b.diff-a.diff||b.gf-a.gf||a.p.real_name.localeCompare(b.p.real_name,'zh-CN'));
       return {group:gi+1,rows};
@@ -292,7 +300,7 @@
   }
 
   function statusText(s){return STATUS_NAMES[s]||s;}
-  function matchStatus(m){if(m.status==='completed')return '已结束';if(m.status==='bye')return '轮空';if(m.status==='cancelled')return '已取消';return '待进行';}
+  function matchStatus(m){if(m.status==='completed')return forfeitLabel(m.forfeit)?'弃权':'已结束';if(m.status==='bye')return '轮空';if(m.status==='cancelled')return '已取消';return '待进行';}
   function matchPlayersReady(m){return !!m.player_a_id&&!!m.player_b_id;}
 
   function matchEditor(m) {
@@ -301,12 +309,15 @@
     if(!matchPlayersReady(m))return '';
     const canEdit=m.status==='scheduled'||m.status==='completed';
     if(!canEdit)return '';
-    return `<div class="tournament-result-editor"><input type="number" min="0" max="99" value="${m.score_a ?? ''}" placeholder="0" data-tm-score-a="${m.id}"><span>:</span><input type="number" min="0" max="99" value="${m.score_b ?? ''}" placeholder="0" data-tm-score-b="${m.id}"><button class="btn btn-primary btn-sm" data-save-tm="${m.id}">${m.status==='completed'?'修改结果':'录入结果'}</button>${m.status==='completed'?`<button class="text-btn danger-text" data-clear-tm="${m.id}">清除结果</button>`:''}</div>`;
+    const forfeit=FORFEIT_NAMES[m.forfeit]?m.forfeit:'none';
+    const disabled=forfeit==='none'?'':'disabled';
+    const forfeitOptions=Object.entries(FORFEIT_NAMES).map(([value,label])=>`<option value="${value}" ${forfeit===value?'selected':''}>${label}</option>`).join('');
+    return `<div class="tournament-result-editor"><input type="number" min="0" max="99" value="${m.score_a ?? ''}" placeholder="0" data-tm-score-a="${m.id}" ${disabled}><span>:</span><input type="number" min="0" max="99" value="${m.score_b ?? ''}" placeholder="0" data-tm-score-b="${m.id}" ${disabled}><select class="forfeit-select" data-tm-forfeit="${m.id}" title="选择弃权方：任何一方弃权时本场不计入积分">${forfeitOptions}</select><button class="btn btn-primary btn-sm" data-save-tm="${m.id}">${m.status==='completed'?'修改结果':'录入结果'}</button>${m.status==='completed'?`<button class="text-btn danger-text" data-clear-tm="${m.id}">清除结果</button>`:''}</div>`;
   }
 
   function firstRoundSlotEditor(m) {
     if(!isStaff()||!(m.stage==='knockout'||m.stage==='winners')||m.round_no!==1||!['scheduled','bye'].includes(m.status))return '';
-    const optionHtml=(slot)=>state.entries.map(e=>{const p=player(e.player_id);const selected=(slot===1?m.player_a_id:m.player_b_id)===e.player_id?'selected':'';return `<option value="${e.player_id}" ${selected}>${esc(p?.real_name||'未知')}</option>`;}).join('');
+    const optionHtml=(slot)=>state.entries.slice().sort((a,b)=>String(player(a.player_id)?.real_name||'').localeCompare(String(player(b.player_id)?.real_name||''),'zh-CN')).map(e=>{const p=player(e.player_id);const selected=(slot===1?m.player_a_id:m.player_b_id)===e.player_id?'selected':'';return `<option value="${e.player_id}" ${selected}>${esc(p?.real_name||'未知')}</option>`;}).join('');
     const manualBye=(m.player_a_id&&!m.player_b_id)||(!m.player_a_id&&m.player_b_id);
     return `<div class="slot-editors"><select data-tm-slot="${m.id}:1"><option value="">空位</option>${optionHtml(1)}</select><select data-tm-slot="${m.id}:2"><option value="">空位</option>${optionHtml(2)}</select></div>
       ${manualBye&&m.status==='scheduled'?`<button class="text-btn danger-text manual-bye-btn" data-manual-bye="${m.id}">手动设为轮空并晋级</button>`:''}`;
@@ -314,14 +325,18 @@
 
   function matchCard(m) {
     const a=player(m.player_a_id),b=player(m.player_b_id);
-    const score=m.status==='completed'?`${m.score_a}:${m.score_b}`:(m.status==='bye'?'轮空':'—');
+    const forfeit=forfeitLabel(m.forfeit);
+    const isForfeit=m.status==='completed'&&!!forfeit;
+    const scoreA=m.status==='completed'?(isForfeit?(m.forfeit==='a'||m.forfeit==='both'?'弃权':''):m.score_a):'';
+    const scoreB=m.status==='completed'?(isForfeit?(m.forfeit==='b'||m.forfeit==='both'?'弃权':''):m.score_b):'';
     const win=m.winner_id;
     return `<div class="bracket-match ${m.status==='completed'?'done':''} ${m.status==='bye'?'bye':''}">
       <div class="bracket-match-top"><span>${esc(m.label||`第${m.round_no}轮 · ${m.match_no}`)}</span><span class="pill">${matchStatus(m)}</span></div>
-      <div class="bracket-player ${win===m.player_a_id?'winner':''}"><span>${esc(a?.real_name||'待定')}</span><b>${m.status==='completed' ? m.score_a : ''}</b></div>
-      <div class="bracket-player ${win===m.player_b_id?'winner':''}"><span>${esc(b?.real_name||'待定')}</span><b>${m.status==='completed' ? m.score_b : ''}</b></div>
+      <div class="bracket-player ${win===m.player_a_id?'winner':''}"><span>${esc(a?.real_name||'待定')}</span><b>${scoreA}</b></div>
+      <div class="bracket-player ${win===m.player_b_id?'winner':''}"><span>${esc(b?.real_name||'待定')}</span><b>${scoreB}</b></div>
       ${m.status==='scheduled'&&(!a||!b)?'<div class="match-hint">等待晋级选手</div>':''}
       ${m.status==='bye'?`<div class="match-hint">${esc(playerName(m.winner_id))} 轮空晋级</div>`:''}
+      ${isForfeit?`<div class="match-hint">${esc(forfeit)}，本场不计入积分</div>`:''}
       ${firstRoundSlotEditor(m)}
       ${matchEditor(m)}
     </div>`;
@@ -343,7 +358,7 @@
     const locked=state.matches.some(m=>m.stage==='group' && m.status==='completed');
     return `<div class="card"><div class="card-head"><div><h3>手动分组与小组签位</h3><span class="muted">管理员/副管理员手动决定每名选手进入哪个小组及小组位置；系统不会自动抽签。</span></div><div class="form-actions"><button class="btn btn-primary btn-sm" data-generate-groups ${(!allAssigned||hasGroupMatches||locked)?'disabled':''}>生成小组赛程</button></div></div>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>选手</th><th>用户名</th><th>小组</th><th>小组位置</th></tr></thead><tbody>
-      ${state.entries.map(e=>{
+      ${state.entries.slice().sort((a,b)=>String(player(a.player_id)?.real_name||'').localeCompare(String(player(b.player_id)?.real_name||''),'zh-CN')).map(e=>{
         const p=player(e.player_id);
         const groupOpts=[`<option value="">未分组</option>`].concat(Array.from({length:g},(_,i)=>`<option value="${i+1}" ${Number(e.group_no)===i+1?'selected':''}>${String.fromCharCode(65+i)}组</option>`)).join('');
         const slotOpts=Array.from({length:maxSlot},(_,i)=>`<option value="${i+1}" ${Number(e.slot_no)===i+1?'selected':''}>${i+1}</option>`).join('');
@@ -385,12 +400,13 @@
   function populatePlayerFilter(){
     if(!els.playerFilter)return;
     const previous=els.playerFilter.value||state.playerFilter;
-    els.playerFilter.innerHTML='<option value="">所有选手</option>'+state.profiles.filter(p=>!p.is_banned).map(p=>`<option value="${p.id}">${esc(p.real_name)}</option>`).join('');
+    const sorted=state.profiles.filter(p=>!p.is_banned).slice().sort((a,b)=>String(a.real_name||'').localeCompare(String(b.real_name||''),'zh-CN'));
+    els.playerFilter.innerHTML='<option value="">所有选手</option>'+sorted.map(p=>`<option value="${p.id}">${esc(p.real_name)}</option>`).join('');
     if(previous&&state.profiles.some(p=>p.id===previous)) els.playerFilter.value=previous; else els.playerFilter.value=state.playerFilter||'';
   }
 
   function renderCreatePlayers() {
-    const ranked=state.profiles.filter(p=>!p.is_banned).slice().sort((a,b)=>a.real_name.localeCompare(b.real_name,'zh-CN'));
+    const ranked=state.profiles.filter(p=>!p.is_banned).slice().sort((a,b)=>String(a.real_name||'').localeCompare(String(b.real_name||''),'zh-CN'));
     els.playerChecklist.innerHTML=ranked.map(p=>`<label class="player-check"><input type="checkbox" value="${p.id}"><span><strong>${esc(p.real_name)}</strong><small>@${esc(p.username)}</small></span></label>`).join('')||'<div class="empty">暂无可报名选手。</div>';
   }
 
@@ -521,7 +537,23 @@
   async function loadTournamentOnce(id){const [{data:entries},{data:matches}]=await Promise.all([client.from('tournament_entries').select('*').eq('tournament_id',id).order('seed',{ascending:true}),client.from('tournament_matches').select('*').eq('tournament_id',id).order('round_no',{ascending:true}).order('match_no',{ascending:true})]);state.entries=entries||[];state.matches=matches||[];renderTournamentDetail();}
 
   async function saveResult(id,clear=false){
-    try{const a=document.querySelector(`[data-tm-score-a="${id}"]`);const b=document.querySelector(`[data-tm-score-b="${id}"]`);const sa=clear?null:(a?.value===''?null:Number(a?.value));const sb=clear?null:(b?.value===''?null:Number(b?.value));if(!clear&&(!Number.isInteger(sa)||!Number.isInteger(sb)||sa===sb))throw new Error('请输入两个不同的整数比分。');const {error}=await client.rpc('staff_set_tournament_result',{p_match_id:id,p_score_a:sa,p_score_b:sb});if(error)throw error;await refreshTournaments(state.selectedId);toast(clear?'结果已清除，积分将按剩余赛事重算。':'比赛结果已保存，积分已自动更新。');}catch(e){toast(e.message||'保存失败。','error');}
+    try{
+      const a=document.querySelector(`[data-tm-score-a="${id}"]`);
+      const b=document.querySelector(`[data-tm-score-b="${id}"]`);
+      const forfeitEl=document.querySelector(`[data-tm-forfeit="${id}"]`);
+      const forfeit=clear?'none':(forfeitEl?.value||'none');
+      const isForfeit=forfeit!=='none';
+      const sa=(clear||isForfeit)?null:(a?.value===''?null:Number(a?.value));
+      const sb=(clear||isForfeit)?null:(b?.value===''?null:Number(b?.value));
+      if(!clear&&!isForfeit&&(!Number.isInteger(sa)||!Number.isInteger(sb)||sa===sb))throw new Error('请输入两个不同的整数比分。');
+      // 仅在弃权时附带 p_forfeit，保证未升级 RPC 的部署下正常比分录入仍可用。
+      const params={p_match_id:id,p_score_a:sa,p_score_b:sb};
+      if(isForfeit)params.p_forfeit=forfeit;
+      const {error}=await client.rpc('staff_set_tournament_result',params);
+      if(error)throw error;
+      await refreshTournaments(state.selectedId);
+      toast(clear?'结果已清除，积分将按剩余赛事重算。':isForfeit?'已记录弃权结果，本场不计入积分。':'比赛结果已保存，积分已自动更新。');
+    }catch(e){toast(e.message||'保存失败。','error');}
   }
   async function manualBye(id){
     try{
@@ -554,10 +586,14 @@
       const gg=e.target.closest('[data-generate-groups]');if(gg&&!gg.disabled){generateGroupMatches();return;}
       const gk=e.target.closest('[data-generate-knockout]');if(gk){generateKnockoutFramework();return;}
       const bye=e.target.closest('[data-manual-bye]');if(bye){if(confirm('确定将本场设置为轮空并手动推进吗？'))manualBye(bye.dataset.manualBye);return;}
-      const pt=e.target.closest('[data-player-tournaments]');if(pt){state.playerFilter=pt.dataset.playerTournaments;if(els.playerFilter)els.playerFilter.value=pt.dataset.playerTournaments;navigateTournaments();return;}
     });
     document.addEventListener('change',e=>{
       const slot=e.target.closest('[data-tm-slot]');if(slot)setSlot(slot.dataset.tmSlot,slot.value);
+      const forfeit=e.target.closest('[data-tm-forfeit]');if(forfeit){
+        const id=forfeit.dataset.tmForfeit;
+        const isForfeit=forfeit.value!=='none';
+        document.querySelectorAll(`[data-tm-score-a="${id}"],[data-tm-score-b="${id}"]`).forEach(inp=>{inp.disabled=isForfeit;});
+      }
       const group=e.target.closest('[data-entry-group]');if(group){
         const playerId=group.dataset.entryGroup;
         const entry=state.entries.find(x=>x.player_id===playerId);
