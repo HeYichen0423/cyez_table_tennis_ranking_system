@@ -24,6 +24,8 @@ const STATUS_NAMES = {
   rejected: '已拒绝',
   cancelled: '已撤销'
 };
+// 管理员创建账号 / 重置密码时使用的固定初始密码；用户首次登录后必须自行修改。
+const INITIAL_PASSWORD = '11111111';
 
 const state = {
   profiles: [],
@@ -124,6 +126,11 @@ const els = {
   adminResetSummary: $('adminResetSummary'),
   adminResetForm: $('adminResetForm'),
   adminResetPassword: $('adminResetPassword'),
+  playerMatchesBackdrop: $('playerMatchesBackdrop'),
+  playerMatchesClose: $('playerMatchesClose'),
+  playerMatchesTitle: $('playerMatchesTitle'),
+  playerMatchesSummary: $('playerMatchesSummary'),
+  playerMatchesBody: $('playerMatchesBody'),
   notificationBadge: $('notificationBadge'),
   notificationsList: $('notificationsList'),
   markAllNotificationsBtn: $('markAllNotificationsBtn'),
@@ -149,7 +156,9 @@ function formatDate(v) { return new Date(v).toLocaleString('zh-CN', {year:'numer
 function formatDateLong(v) { return new Date(v).toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 function formatPct(n) { return `${(Number(n || 0) * 100).toFixed(1)}%`; }
 function profile(id) { return state.profiles.find(p => p.id === id); }
-function activeProfiles() { return state.profiles.filter(p => !p.is_banned); }
+// 统一按真实姓名排序（中文按拼音，即“姓名首字母”顺序），供所有选择选手的下拉与列表复用。
+function byPlayerName(a, b) { return String(a?.real_name || '').localeCompare(String(b?.real_name || ''), 'zh-CN'); }
+function activeProfiles() { return state.profiles.filter(p => !p.is_banned).slice().sort(byPlayerName); }
 function isStaff() { return !!currentProfile && !currentProfile.is_banned && ['admin','moderator'].includes(currentProfile.role); }
 function isAdmin() { return !!currentProfile && !currentProfile.is_banned && currentProfile.role === 'admin'; }
 function playerLabel(id) { const p = profile(id); return p ? p.real_name : '未知选手'; }
@@ -193,7 +202,7 @@ function setDefaultDate() {
   els.matchDate.value = d.toISOString().slice(0,16);
 }
 function fillSelect(el, includeEmpty=true, onlyActive=true) {
-  const arr = onlyActive ? activeProfiles() : state.profiles;
+  const arr = (onlyActive ? activeProfiles() : state.profiles.slice().sort(byPlayerName));
   const previous = el.value;
   el.innerHTML = `${includeEmpty ? '<option value="">请选择选手</option>' : ''}` + arr.map(p => `<option value="${p.id}">${esc(p.real_name)}（${esc(p.username)} · ${formatRating(state.ratings.get(p.id) ?? INITIAL_RATING)}）</option>`).join('');
   if (arr.some(p => p.id === previous)) el.value = previous;
@@ -594,7 +603,47 @@ function renderAccountBanner() {
 function renderRanking() {
   const q = (els.rankingSearch.value || '').trim().toLowerCase();
   const rows = rankingRows().filter(r => !q || `${r.real_name} ${r.username}`.toLowerCase().includes(q));
-  els.rankingBody.innerHTML = rows.map((r,i)=>`<tr><td><span class="rank-chip">${i+1}</span></td><td class="name-cell">${esc(r.real_name)} <span class="muted">@${esc(r.username)}</span></td><td class="rating-number">${formatRating(r.rating)}</td><td>${r.games}</td><td>${r.wins}-${r.losses}</td><td>${formatPct(r.winRate)}</td><td><span class="pill ${r.active?'active':'off'}">${r.active?'正常':'封禁'}</span></td><td><button class="text-btn" data-player-tournaments="${r.id}">查看赛事</button></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">没有匹配的选手。</div></td></tr>';
+  els.rankingBody.innerHTML = rows.map((r,i)=>`<tr><td><span class="rank-chip">${i+1}</span></td><td class="name-cell">${esc(r.real_name)} <span class="muted">@${esc(r.username)}</span></td><td class="rating-number">${formatRating(r.rating)}</td><td>${r.games}</td><td>${r.wins}-${r.losses}</td><td>${formatPct(r.winRate)}</td><td><span class="pill ${r.active?'active':'off'}">${r.active?'正常':'封禁'}</span></td><td><button class="text-btn" data-player-matches="${r.id}">查看过去比赛</button></td></tr>`).join('') || '<tr><td colspan="8"><div class="empty">没有匹配的选手。</div></td></tr>';
+}
+
+// 返回某场比赛中指定选手的赛前 / 赛后积分；未生效比赛没有积分信息。
+function matchRatingsFor(m, playerId) {
+  if (m.status !== 'approved' || !m._winnerId) return null;
+  const isWinner = m._winnerId === playerId;
+  const pre = isWinner ? m._preRatingWinner : m._preRatingLoser;
+  if (pre == null) return null;
+  const delta = isWinner ? m._delta : -m._delta;
+  return { pre, post: pre + delta, delta };
+}
+
+function openPlayerMatches(playerId) {
+  const p = profile(playerId);
+  if (!p) return;
+  const ms = state.matches
+    .filter(m => m.player_a_id === playerId || m.player_b_id === playerId)
+    .filter(canSeeMatch)
+    .sort((a,b) => new Date(b.played_at) - new Date(a.played_at) || new Date(b.created_at) - new Date(a.created_at));
+  const approved = ms.filter(m => m.status === 'approved');
+  const wins = approved.filter(m => m._winnerId === playerId).length;
+  els.playerMatchesTitle.textContent = `${p.real_name} 的过去比赛`;
+  els.playerMatchesSummary.innerHTML = `<div><span>已生效场次</span><strong>${approved.length}</strong></div><div><span>胜 - 负</span><strong>${wins} - ${approved.length - wins}</strong></div>`;
+  els.playerMatchesBody.innerHTML = ms.map(m => {
+    const isA = m.player_a_id === playerId;
+    const opp = profile(isA ? m.player_b_id : m.player_a_id);
+    const myScore = isA ? m.score_a : m.score_b;
+    const oppScore = isA ? m.score_b : m.score_a;
+    const r = matchRatingsFor(m, playerId);
+    const result = m.status !== 'approved'
+      ? `<span class="pill">${esc(STATUS_NAMES[m.status] || m.status)}</span>`
+      : m._winnerId === playerId ? '<span class="positive">胜</span>' : '<span class="negative">负</span>';
+    const postClass = r ? (r.delta >= 0 ? 'positive' : 'negative') : 'neutral';
+    return `<tr><td>${formatDate(m.played_at)}</td><td class="name-cell">${esc(opp?.real_name || '未知')}</td><td><strong>${myScore}:${oppScore}</strong></td><td>${result}</td><td>${r ? formatRating(r.pre) : '—'}</td><td class="${postClass}">${r ? formatRating(r.post) : '—'}</td></tr>`;
+  }).join('') || '<tr><td colspan="6"><div class="empty">该选手还没有比赛记录。</div></td></tr>';
+  els.playerMatchesBackdrop.hidden = false;
+}
+
+function closePlayerMatches() {
+  if (els.playerMatchesBackdrop) els.playerMatchesBackdrop.hidden = true;
 }
 
 function canSeeMatch(m) {
@@ -808,7 +857,7 @@ function openProfile(options={}) {
   const required = !!options.required || passwordChangeRequired;
   passwordChangeRequired = required;
   els.profileSummary.innerHTML = required
-    ? `<div><span>账号状态</span><strong>请先完成密码修改</strong></div><div><span>提示</span><strong>当前密码由管理员或系统安全地提供</strong></div>`
+    ? `<div><span>首次登录</span><strong>请先修改初始密码</strong></div><div><span>初始密码</span><strong>${INITIAL_PASSWORD}</strong></div>`
     : `<div><span>角色</span><strong>${currentProfile.role==='admin'?'管理员':currentProfile.role==='moderator'?'副管理员':'选手'}</strong></div><div><span>状态</span><strong>${currentProfile.is_banned?'封禁':'正常'}</strong></div>`;
   els.profileRealName.value=currentProfile.real_name;
   els.profileRealName.readOnly = !isAdmin();
@@ -822,7 +871,7 @@ function openProfile(options={}) {
   els.logoutBtn.hidden=false;
   els.passwordForm.classList.toggle('required-password-form', required);
   els.passwordForm.querySelector('.password-hint').textContent = required
-    ? '请使用当前临时密码设置一个新的个人密码。完成后才能继续使用系统。'
+    ? `这是管理员创建账号时设置的初始密码（${INITIAL_PASSWORD}）。首次登录必须修改为你自己的密码，修改完成后才能继续使用系统。`
     : '为了保护账号，请先输入当前密码，再设置新的密码。密码至少 8 位。';
   if (required && !els.profileCurrentPassword.value) els.profileCurrentPassword.value='';
   els.profileBackdrop.hidden=false;
@@ -837,6 +886,25 @@ function closeProfile(force=false) {
   if (!passwordChangeRequired) els.passwordForm.querySelector('.password-hint').textContent='为了保护账号，请先输入当前密码，再设置新的密码。密码至少 8 位。';
 }
 
+// 管理员预建的账号使用统一初始密码且尚未启用（password_change_required = true）。
+// 若本人随后自行注册同一用户名，则用注册时设置的密码替换初始密码，并解除强制改密。
+async function claimPrecreatedAccount(username, realName, newPassword) {
+  const email = `${username}@login.cyez.local`;
+  const { data: signIn, error: signInError } = await supabaseClient.auth.signInWithPassword({ email, password: INITIAL_PASSWORD });
+  if (signInError || !signIn?.user) return false;
+  const userId = signIn.user.id;
+  const { data: profile } = await supabaseClient.from('profiles').select('real_name,password_change_required').eq('id', userId).maybeSingle();
+  // 只有仍处于“初始密码待修改”状态、且注册填写的真实姓名与管理员预建资料一致的账号才允许这样接管，
+  // 避免有人仅凭用户名就顶替他人的预建账号。
+  const nameMatches = String(profile?.real_name || '').trim() === String(realName || '').trim();
+  if (!profile?.password_change_required || !nameMatches) { await supabaseClient.auth.signOut(); return false; }
+  const { error: updateError } = await supabaseClient.auth.updateUser({ password: newPassword });
+  if (updateError) { await supabaseClient.auth.signOut(); return false; }
+  const { error: clearError } = await supabaseClient.from('profiles').update({ password_change_required: false }).eq('id', userId);
+  if (clearError) console.error(clearError);
+  return true;
+}
+
 async function signUp() {
   if (!supabaseClient) throw new Error('尚未配置 Supabase，请先填写 supabase-config.js。');
   const realName=els.signupRealName.value.trim();
@@ -846,12 +914,21 @@ async function signUp() {
   if (!/^[a-z0-9_.-]{3,24}$/.test(username)) throw new Error('用户名需为 3-24 位小写字母、数字、下划线、点或短横线。');
   if (password.length<8) throw new Error('密码至少 8 位。');
   const { data, error } = await supabaseClient.functions.invoke('register-student', { body: { real_name: realName, username, password } });
-  if (error) {
-    let msg=error.message||'注册失败。';
-    try { if(error.context && typeof error.context.json==='function'){const payload=await error.context.json(); if(payload?.error)msg=payload.error;} } catch(_){}
+  if (error || !data?.success) {
+    // 管理员可能已经用统一初始密码预建了这个账号。用户本人来注册时，直接用注册时
+    // 设置的密码替换初始密码，并解除“必须修改密码”，不再强制改密。
+    if (await claimPrecreatedAccount(username, realName, password)) {
+      closeAuth();
+      els.signupForm.reset();
+      await loadSession();
+      await refreshData();
+      showToast('管理员已为你创建过账号，现已用你设置的密码完成注册。');
+      return;
+    }
+    let msg=error?.message||data?.error||'注册失败。';
+    if (error) { try { if(error.context && typeof error.context.json==='function'){const payload=await error.context.json(); if(payload?.error)msg=payload.error;} } catch(_){} }
     throw new Error(msg);
   }
-  if (!data?.success) throw new Error(data?.error||'注册失败。');
   const email=`${username}@login.cyez.local`;
   const {error:loginError}=await supabaseClient.auth.signInWithPassword({email,password});
   if(loginError) throw new Error('注册成功，但自动登录失败，请使用新用户名和密码登录。');
@@ -1096,17 +1173,16 @@ async function adminCreateUser(e) {
   if (!/^[a-z0-9_.-]{3,24}$/.test(username)) { showToast('用户名需为 3-24 位小写字母、数字、下划线、点或短横线。','error'); return; }
   try {
     const { data, error } = await supabaseClient.functions.invoke('admin-create-user', {
-      body: { real_name: realName, username }
+      body: { real_name: realName, username, password: INITIAL_PASSWORD }
     });
     if (error) throw error;
     if (!data?.success) throw new Error(data?.error || '账号创建失败。');
-    if (!data?.temp_password) throw new Error('账号已创建，但服务器没有返回临时密码。请不要关闭窗口，并联系管理员检查 Edge Function。');
     els.adminCreateUserForm.hidden=true;
     els.adminCreateResultUsername.textContent=username;
-    els.adminCreateResultPassword.value=data.temp_password;
+    els.adminCreateResultPassword.value=INITIAL_PASSWORD;
     els.adminCreateResult.hidden=false;
     els.adminCreateResultPassword.select();
-    showToast(`账号 ${username} 创建成功。`);
+    showToast(`账号 ${username} 创建成功，初始密码为 ${INITIAL_PASSWORD}。`);
     try { await refreshData(); } catch (refreshError) { console.error(refreshError); showToast('账号已经创建成功，但页面数据刷新失败，请稍后手动刷新。','error'); }
   } catch(err) {
     showToast(err.message || '账号创建失败。请确认 admin-create-user Edge Function 已部署。','error');
@@ -1147,15 +1223,14 @@ async function adminResetPassword(e) {
     const token = sessionData.session?.access_token;
     if (!token) throw new Error('登录状态已失效，请重新登录。');
     const { data, error } = await supabaseClient.functions.invoke('admin-reset-password', {
-      body: { target_user_id: targetUserId }
+      body: { target_user_id: targetUserId, password: INITIAL_PASSWORD }
     });
     if (error) throw error;
     if (!data?.success) throw new Error(data?.error || '密码重置失败。');
-    if (!data?.temp_password) throw new Error('密码已处理，但服务器没有返回临时密码。请不要关闭窗口，并检查 Edge Function。');
     els.adminResetPassword.readOnly = true;
-    els.adminResetPassword.value = data.temp_password;
+    els.adminResetPassword.value = INITIAL_PASSWORD;
     els.adminResetPassword.select();
-    showToast(`已为 ${playerLabel(targetUserId)} 生成新的临时密码。请先复制并安全地交给用户。`);
+    showToast(`已为 ${playerLabel(targetUserId)} 重置密码为 ${INITIAL_PASSWORD}。请提醒用户登录后立即修改。`);
   } catch(e) {
     showToast(e.message || '管理员重置密码失败。请确认 Edge Function 已部署。','error');
   }
@@ -1265,6 +1340,7 @@ async function init() {
   populateCompetition(); setDefaultDate();
   initTheme();
   bindEvents();
+  renderFormulas();
   const ok = await bootWithTimeout();
   if (!ok) return;
   setupRealtime();
@@ -1279,6 +1355,19 @@ async function init() {
     } catch(e) { console.error(e); showToast(e.message || '账号状态更新失败。','error'); }
   });
   updateAuthUi();
+}
+
+// 用 KaTeX 渲染规则页的公式；若 CDN 未加载成功，则保留 HTML 里的纯文本回退。
+function renderFormulas() {
+  const katex = window.katex;
+  if (!katex) return;
+  document.querySelectorAll('[data-tex]').forEach(el => {
+    if (el.dataset.texRendered === '1') return;
+    try {
+      katex.render(el.dataset.tex, el, { throwOnError: false, displayMode: el.classList.contains('formula') });
+      el.dataset.texRendered = '1';
+    } catch (_) { /* 渲染失败时保留原有文本 */ }
+  });
 }
 
 function installBackdropClose(backdrop, closeFn) {
@@ -1336,6 +1425,7 @@ function bindEvents() {
     const deleteBtn=e.target.closest('[data-delete-user]'); if(deleteBtn){await deleteUser(deleteBtn.dataset.deleteUser);return;}
     const resetPwdBtn=e.target.closest('[data-reset-password]'); if(resetPwdBtn){openAdminResetPassword(resetPwdBtn.dataset.resetPassword);return;}
     const createUserBtn=e.target.closest('[data-admin-create-user]'); if(createUserBtn){openAdminCreateUser();return;}
+    const playerMatchesBtn=e.target.closest('[data-player-matches]'); if(playerMatchesBtn){openPlayerMatches(playerMatchesBtn.dataset.playerMatches);return;}
     if(e.target.id==='refreshAuditBtn'){loadAuditLogs();return;}
     const saveInitial=e.target.closest('[data-save-initial-rating]'); if(saveInitial){await saveInitialRating(saveInitial.dataset.saveInitialRating);return;}
     const notifRead=e.target.closest('[data-notification-read]'); if(notifRead){await markNotificationRead(notifRead.dataset.notificationRead);return;}
@@ -1366,7 +1456,7 @@ function bindEvents() {
   els.adminCreateCopyPassword?.addEventListener('click',async ()=>{
     const value=els.adminCreateResultPassword?.value||'';
     if(!value)return;
-    try{await navigator.clipboard.writeText(value);showToast('临时密码已复制。');}
+    try{await navigator.clipboard.writeText(value);showToast('初始密码已复制。');}
     catch(_){els.adminCreateResultPassword.select();showToast('浏览器未允许自动复制，请手动复制。','error');}
   });
   els.profileForm.addEventListener('submit',saveProfile);
@@ -1375,6 +1465,8 @@ function bindEvents() {
   els.adminResetClose.addEventListener('click',closeAdminResetPassword);
   installBackdropClose(els.adminResetBackdrop, closeAdminResetPassword);
   els.adminResetForm.addEventListener('submit',adminResetPassword);
+  els.playerMatchesClose?.addEventListener('click', closePlayerMatches);
+  installBackdropClose(els.playerMatchesBackdrop, closePlayerMatches);
   els.matchForm.addEventListener('submit',submitMatch);
   els.matchForm.addEventListener('reset',()=>setTimeout(()=>{setDefaultDate();updateRatingsInForm();updatePreview();},0));
   [els.playerA,els.playerB,els.scoreA,els.scoreB,els.competitionType].forEach(el=>el.addEventListener('input',updatePreview));
@@ -1392,6 +1484,7 @@ function bindEvents() {
     if (!els.authBackdrop.hidden) { closeAuth(); return; }
     if (!els.adminCreateUserBackdrop.hidden) { closeAdminCreateUser(); return; }
     if (!els.adminResetBackdrop.hidden) { closeAdminResetPassword(); return; }
+    if (!els.playerMatchesBackdrop.hidden) { closePlayerMatches(); return; }
     if (!els.profileBackdrop.hidden && !passwordChangeRequired) { closeProfile(); return; }
   });
   setupDraggableModals();
