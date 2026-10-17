@@ -606,6 +606,133 @@ begin
 end;
 $$;
 
+-- 自动轮空解析：双方弃权（或上游未产生晋级者）时，下游只剩一名选手的比赛
+-- 直接判为轮空并让其继续晋级，避免出现“待定 / 等待晋级选手”卡住。
+create or replace function private.resolve_tournament_byes(p_tournament_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_changed boolean := true;
+  v_guard integer := 0;
+  v_match record;
+  v_a uuid;
+  v_b uuid;
+  v_slot integer;
+  v_f_status text;
+  v_f_winner uuid;
+  v_has_feeder boolean;
+  v_pending boolean;
+  v_winner uuid;
+begin
+  while v_changed loop
+    v_changed := false;
+    v_guard := v_guard + 1;
+    exit when v_guard > 50;
+
+    for v_match in
+      select m.*
+      from public.tournament_matches m
+      where m.tournament_id = p_tournament_id
+        and m.status in ('scheduled','bye')
+      order by m.round_no, m.match_no
+    loop
+      v_a := v_match.player_a_id;
+      v_b := v_match.player_b_id;
+
+      -- 有上游比赛的空位，以最新上游结果为准；上游未结束则清空。
+      for v_slot in 1..2 loop
+        v_f_status := null;
+        v_f_winner := null;
+        select f.status, f.winner_id
+          into v_f_status, v_f_winner
+        from public.tournament_matches f
+        where f.tournament_id = p_tournament_id
+          and ((f.next_match_id = v_match.id and f.next_slot = v_slot)
+            or (f.next_loss_match_id = v_match.id and f.next_loss_slot = v_slot))
+        limit 1;
+
+        if v_f_status is not null then
+          if v_f_status in ('completed','bye') then
+            if v_slot = 1 then v_a := v_f_winner; else v_b := v_f_winner; end if;
+          else
+            if v_slot = 1 then v_a := null; else v_b := null; end if;
+          end if;
+        end if;
+      end loop;
+
+      if v_a is distinct from v_match.player_a_id or v_b is distinct from v_match.player_b_id then
+        update public.tournament_matches
+           set player_a_id = v_a, player_b_id = v_b, updated_at = now()
+         where id = v_match.id;
+        v_changed := true;
+      end if;
+
+      if (v_a is null) <> (v_b is null) then
+        v_slot := case when v_a is null then 1 else 2 end;
+        v_winner := coalesce(v_a, v_b);
+
+        select exists (
+          select 1 from public.tournament_matches f
+          where f.tournament_id = p_tournament_id
+            and ((f.next_match_id = v_match.id and f.next_slot = v_slot)
+              or (f.next_loss_match_id = v_match.id and f.next_loss_slot = v_slot))
+        ) into v_has_feeder;
+
+        -- 首轮空位没有上游比赛，保持“手动设为轮空”的既有行为，不自动处理。
+        if v_has_feeder then
+          select exists (
+            select 1 from public.tournament_matches f
+            where f.tournament_id = p_tournament_id
+              and ((f.next_match_id = v_match.id and f.next_slot = v_slot)
+                or (f.next_loss_match_id = v_match.id and f.next_loss_slot = v_slot))
+              and f.status not in ('completed','bye','cancelled')
+          ) into v_pending;
+
+          if not v_pending then
+            if v_match.status <> 'bye' or v_match.winner_id is distinct from v_winner then
+              update public.tournament_matches
+                 set status = 'bye', winner_id = v_winner, updated_at = now()
+               where id = v_match.id;
+              v_changed := true;
+            end if;
+          elsif v_match.status = 'bye' then
+            update public.tournament_matches
+               set status = 'scheduled', winner_id = null, updated_at = now()
+             where id = v_match.id;
+            v_changed := true;
+          end if;
+        end if;
+      elsif v_match.status = 'bye' then
+        update public.tournament_matches
+           set status = 'scheduled', winner_id = null, updated_at = now()
+         where id = v_match.id;
+        v_changed := true;
+      end if;
+    end loop;
+  end while;
+end;
+$$;
+
+-- 供管理员手动触发一次轮空重算（用于修复历史数据）。
+create or replace function public.staff_resolve_tournament_byes(p_tournament_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.is_staff() then
+    raise exception '没有赛事管理权限。';
+  end if;
+  perform private.resolve_tournament_byes(p_tournament_id);
+end;
+$$;
+
+grant execute on function public.staff_resolve_tournament_byes(uuid) to authenticated;
+
 create or replace function public.staff_set_tournament_result(
   p_match_id uuid,
   p_score_a integer default null,
@@ -661,6 +788,7 @@ begin
        set status = 'scheduled', score_a = null, score_b = null, forfeit = 'none',
            winner_id = null, rating_match_id = null, updated_at = now()
      where id = v_match.id;
+    perform private.resolve_tournament_byes(v_match.tournament_id);
     return;
   end if;
 
@@ -743,6 +871,9 @@ begin
       update public.tournament_matches set player_a_id = v_loser, updated_at = now() where id = v_match.next_loss_match_id;
     end if;
   end if;
+
+  -- 双方弃权等没有晋级者的情况：让下游仅剩一人的比赛自动轮空并继续晋级。
+  perform private.resolve_tournament_byes(v_match.tournament_id);
 end;
 $$;
 

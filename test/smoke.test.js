@@ -87,7 +87,7 @@ test('按 Esc 可关闭普通弹窗，但强制改密弹窗不可关闭', { skip
 });
 
 // 赛事录入：管理员可以为一方的弃权选择结果，弃权场次在界面上标记为不计入积分。
-function makeTournamentStub(rpcResult) {
+function makeTournamentStub(rpcResult, overrides = {}) {
   const data = {
     profiles: [
       { id: 'p1', real_name: '管理员', username: 'admin', role: 'admin', is_banned: false, created_at: '2026-01-01' },
@@ -105,6 +105,7 @@ function makeTournamentStub(rpcResult) {
       { id: 'm2', tournament_id: 't1', bracket_key: 'winners-r1-m2', stage: 'winners', round_no: 1, match_no: 2, label: '第1轮 · 2', player_a_id: 'p2', player_b_id: 'p3', score_a: null, score_b: null, status: 'completed', winner_id: 'p2', forfeit: 'a', next_match_id: null, next_slot: null, next_loss_match_id: null, next_loss_slot: null },
     ],
   };
+  Object.assign(data, overrides);
   const query = rows => ({
     select() { return this; }, order() { return this; }, range() { return this; }, eq() { return this; }, is() { return this; }, limit() { return this; },
     maybeSingle() { return Promise.resolve({ data: rows[0] ?? null, error: null }); },
@@ -235,4 +236,33 @@ test('弃权保存遇到未升级的 RPC 时提示部署 SQL', { skip: JSDOM ? f
   assert.equal(toasts[0].type, 'error');
   assert.ok(toasts[0].msg.includes('supabase-schema.sql'), '提示应引导管理员部署 SQL：' + toasts[0].msg);
   assert.ok(!toasts[0].msg.includes('Could not find the function'), '不应把 PostgREST 原始报错直接抛给用户');
+});
+
+test('双方弃权后，下游只剩一人的比赛自动轮空并可手动兜底', { skip: JSDOM ? false : 'jsdom 未安装' }, async () => {
+  const calls = [];
+  const matches = [
+    // 半决赛：p2 胜 p3，晋级决赛 slot 1
+    { id: 's1', tournament_id: 't1', bracket_key: 'winners-r1-m1', stage: 'winners', round_no: 1, match_no: 1, label: '第1轮 · 1', player_a_id: 'p2', player_b_id: 'p3', score_a: 4, score_b: 1, status: 'completed', winner_id: 'p2', forfeit: 'none', next_match_id: 'final', next_slot: 1, next_loss_match_id: null, next_loss_slot: null },
+    // 半决赛：双方弃权，没有胜者，决赛 slot 2 空缺
+    { id: 's2', tournament_id: 't1', bracket_key: 'winners-r1-m2', stage: 'winners', round_no: 1, match_no: 2, label: '第1轮 · 2', player_a_id: 'p4', player_b_id: 'p5', score_a: null, score_b: null, status: 'completed', winner_id: null, forfeit: 'both', next_match_id: 'final', next_slot: 2, next_loss_match_id: null, next_loss_slot: null },
+    // 决赛只剩 p2
+    { id: 'final', tournament_id: 't1', bracket_key: 'winners-r2-m1', stage: 'winners', round_no: 2, match_no: 1, label: '决赛', player_a_id: 'p2', player_b_id: null, score_a: null, score_b: null, status: 'scheduled', winner_id: null, forfeit: 'none', next_match_id: null, next_slot: null, next_loss_match_id: null, next_loss_slot: null },
+  ];
+  const stub = makeTournamentStub(null, { tournament_matches: matches });
+  const originalRpc = stub.rpc;
+  stub.rpc = (fn, params) => { calls.push({ fn, params }); return originalRpc(fn, params); };
+
+  const dom = new JSDOM(read('index.html'), { runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://cyeztt.me/' });
+  const { window } = dom;
+  window.supabase = { createClient: () => stub };
+  window.CYEZ_SUPABASE_CONFIG = { url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' };
+  for (const file of ['rating-core.js', 'app.js', 'tournament.js']) window.eval(read(file));
+  await new Promise(r => setTimeout(r, 120));
+
+  const callsToResolve = calls.filter(c => c.fn === 'staff_resolve_tournament_byes');
+  assert.equal(callsToResolve.length, 1, '打开赛事时应自动触发一次轮空重算');
+  assert.equal(callsToResolve[0].params.p_tournament_id, 't1');
+
+  const html = window.document.getElementById('tournamentDetail').innerHTML;
+  assert.ok(html.includes('data-manual-bye="final"'), '下游比赛应提供手动轮空按钮作为兜底');
 });
