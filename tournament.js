@@ -278,6 +278,8 @@
     if(eErr)throw eErr;if(mErr)throw mErr;
     state.entries=entries||[];state.matches=matches||[];
     renderTournamentDetail();
+    // 管理员打开赛事时，顺带修复因双方弃权而卡住的下游签位。
+    healPendingByes();
   }
 
   Object.defineProperty(state,'selectedTournament',{get(){return state.tournaments.find(t=>t.id===state.selectedId)||null;}});
@@ -323,6 +325,51 @@
       ${manualBye&&m.status==='scheduled'?`<button class="text-btn danger-text manual-bye-btn" data-manual-bye="${m.id}">手动设为轮空并晋级</button>`:''}`;
   }
 
+  // 找到某场某个签位的所有上游比赛（胜者组线路 + 败者组线路）。
+  function feedersFor(matchId,slot){
+    return state.matches.filter(f=>
+      (f.next_match_id===matchId&&Number(f.next_slot)===slot)||
+      (f.next_loss_match_id===matchId&&Number(f.next_loss_slot)===slot));
+  }
+
+  // 下游只剩一名选手、且空位对应的上游比赛都已结束却没有产生晋级者（如双方弃权）时，
+  // 该场应自动判为轮空。这里只针对有上游比赛的空位，首轮手动轮空逻辑保持不变。
+  function pendingByeMatches(){
+    return state.matches.filter(m=>{
+      if(m.status!=='scheduled')return false;
+      const hasA=!!m.player_a_id,hasB=!!m.player_b_id;
+      if(hasA===hasB)return false;
+      const feeders=feedersFor(m.id,hasA?2:1);
+      if(!feeders.length)return false;
+      return feeders.every(f=>['completed','bye','cancelled'].includes(f.status));
+    });
+  }
+
+  let byeHealInFlight=false;
+  async function healPendingByes(){
+    if(!client||!isStaff()||byeHealInFlight)return;
+    if(!pendingByeMatches().length)return;
+    byeHealInFlight=true;
+    try{
+      const {error}=await client.rpc('staff_resolve_tournament_byes',{p_tournament_id:state.selectedId});
+      if(error)throw error;
+      await loadTournament(state.selectedId);
+    }catch(_){/* 旧部署没有该 RPC 时忽略，管理员可用手动按钮处理 */}
+    finally{byeHealInFlight=false;}
+  }
+
+  // 下游比赛的手动兜底按钮（首轮另有签位编辑区）。
+  function downstreamByeControl(m){
+    if(!isStaff()||m.status!=='scheduled')return '';
+    const hasA=!!m.player_a_id,hasB=!!m.player_b_id;
+    if(hasA===hasB)return '';
+    if((m.stage==='knockout'||m.stage==='winners')&&m.round_no===1)return '';
+    const feeders=feedersFor(m.id,hasA?2:1);
+    if(!feeders.length)return '';
+    if(!feeders.every(f=>['completed','bye','cancelled'].includes(f.status)))return '';
+    return `<button class="text-btn danger-text manual-bye-btn" data-manual-bye="${m.id}">标记轮空并晋级</button>`;
+  }
+
   function matchCard(m) {
     const a=player(m.player_a_id),b=player(m.player_b_id);
     const forfeit=forfeitLabel(m.forfeit);
@@ -338,6 +385,7 @@
       ${m.status==='bye'?`<div class="match-hint">${esc(playerName(m.winner_id))} 轮空晋级</div>`:''}
       ${isForfeit?`<div class="match-hint">${esc(forfeit)}，本场不计入积分</div>`:''}
       ${firstRoundSlotEditor(m)}
+      ${downstreamByeControl(m)}
       ${matchEditor(m)}
     </div>`;
   }

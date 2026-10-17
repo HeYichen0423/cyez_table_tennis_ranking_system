@@ -61,6 +61,8 @@ update public.profiles set role = 'admin' where username = '你的用户名';
   `password_change_required`，因此不再强制改密。
 - **赛事结果**：`staff_set_tournament_result` 需接受 `p_forfeit`（`none`/`a`/`b`/`both`）。
   只要有任何一方弃权，就只记录胜负并推进签位，不要写入 `public.matches`，因此该场不计入积分。
+  双方弃权等导致下游签位无人晋级时，若下游只剩一名选手，该场会自动判为轮空并继续晋级；
+  管理员打开赛事时会自动重算，签位卡片上也提供“标记轮空并晋级”作为兜底。
   参考实现见 `supabase-schema.sql` 第 12 节。
 
 ## 测试
