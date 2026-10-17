@@ -537,12 +537,13 @@
   async function loadTournamentOnce(id){const [{data:entries},{data:matches}]=await Promise.all([client.from('tournament_entries').select('*').eq('tournament_id',id).order('seed',{ascending:true}),client.from('tournament_matches').select('*').eq('tournament_id',id).order('round_no',{ascending:true}).order('match_no',{ascending:true})]);state.entries=entries||[];state.matches=matches||[];renderTournamentDetail();}
 
   async function saveResult(id,clear=false){
+    let isForfeit=false;
     try{
       const a=document.querySelector(`[data-tm-score-a="${id}"]`);
       const b=document.querySelector(`[data-tm-score-b="${id}"]`);
       const forfeitEl=document.querySelector(`[data-tm-forfeit="${id}"]`);
       const forfeit=clear?'none':(forfeitEl?.value||'none');
-      const isForfeit=forfeit!=='none';
+      isForfeit=forfeit!=='none';
       const sa=(clear||isForfeit)?null:(a?.value===''?null:Number(a?.value));
       const sb=(clear||isForfeit)?null:(b?.value===''?null:Number(b?.value));
       if(!clear&&!isForfeit&&(!Number.isInteger(sa)||!Number.isInteger(sb)||sa===sb))throw new Error('请输入两个不同的整数比分。');
@@ -553,7 +554,12 @@
       if(error)throw error;
       await refreshTournaments(state.selectedId);
       toast(clear?'结果已清除，积分将按剩余赛事重算。':isForfeit?'已记录弃权结果，本场不计入积分。':'比赛结果已保存，积分已自动更新。');
-    }catch(e){toast(e.message||'保存失败。','error');}
+    }catch(e){
+      const msg=e?.message||'保存失败。';
+      // 线上 RPC 若仍是旧版（没有 p_forfeit 参数），PostgREST 会报“找不到该函数”。
+      if(isForfeit&&/could not find the function/i.test(msg))toast('服务器尚未部署支持弃权的 staff_set_tournament_result（缺少 p_forfeit 参数）。请先在 Supabase SQL Editor 执行 supabase-schema.sql 第 12 节，再重试。','error');
+      else toast(msg,'error');
+    }
   }
   async function manualBye(id){
     try{

@@ -584,8 +584,22 @@ create policy message_board_comments_read on public.message_board_comments for s
 --
 -- 注意：线上可能已部署同名函数。覆盖前请先对比线上定义，避免丢失线上特有的推进逻辑；
 -- 若线上签名不同，本函数会作为重载存在，请以线上版本为准并仅补充 p_forfeit 参数。
--- 若线上仍是旧的 3 参数版本，先删除以免与新签名形成重载歧义。
-drop function if exists public.staff_set_tournament_result(uuid, integer, integer);
+-- 旧版（如 3 参数版本）必须先删除：否则新旧签名会同时存在，PostgREST 调用时会报
+-- “Could not find the function ... in the schema cache” 之类的重载歧义错误。
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'staff_set_tournament_result'
+  loop
+    execute format('drop function %s', r.sig);
+  end loop;
+end;
+$$;
 
 create or replace function public.staff_set_tournament_result(
   p_match_id uuid,

@@ -87,7 +87,7 @@ test('按 Esc 可关闭普通弹窗，但强制改密弹窗不可关闭', { skip
 });
 
 // 赛事录入：管理员可以为一方的弃权选择结果，弃权场次在界面上标记为不计入积分。
-function makeTournamentStub() {
+function makeTournamentStub(rpcResult) {
   const data = {
     profiles: [
       { id: 'p1', real_name: '管理员', username: 'admin', role: 'admin', is_banned: false, created_at: '2026-01-01' },
@@ -112,7 +112,7 @@ function makeTournamentStub() {
   });
   return {
     from(table) { return query(data[table] || []); },
-    rpc() { return Promise.resolve({ data: [], error: null }); },
+    rpc() { return Promise.resolve(rpcResult || { data: [], error: null }); },
     functions: { invoke: () => Promise.resolve({ data: { success: true }, error: null }) },
     auth: {
       getSession: () => Promise.resolve({ data: { session: { user: { id: 'p1' } } } }),
@@ -209,4 +209,30 @@ test('选择选手的下拉按姓名顺序排列', { skip: JSDOM ? false : 'jsdo
     const names = [...doc.getElementById(id).options].map(o => o.textContent).filter(t => t && !t.startsWith('请选择'));
     assert.deepEqual(names.map(n => n.split('（')[0]), ['钱二', '赵一'], `${id} 应按姓名顺序排列`);
   }
+});
+
+// 线上 RPC 尚未升级（缺少 p_forfeit）时，应给出可执行的提示，而不是 PostgREST 的原始报错。
+test('弃权保存遇到未升级的 RPC 时提示部署 SQL', { skip: JSDOM ? false : 'jsdom 未安装' }, async () => {
+  const rpcError = { message: 'Could not find the function public.staff_set_tournament_result(p_forfeit, p_match_id, p_score_a, p_score_b) in the schema cache', code: 'PGRST202' };
+  const dom = new JSDOM(read('index.html'), { runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://cyeztt.me/' });
+  const { window } = dom;
+  window.supabase = { createClient: () => makeTournamentStub({ data: null, error: rpcError }) };
+  window.CYEZ_SUPABASE_CONFIG = { url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' };
+  for (const file of ['rating-core.js', 'app.js', 'tournament.js']) window.eval(read(file));
+  await new Promise(r => setTimeout(r, 80));
+
+  const doc = window.document;
+  const toasts = [];
+  window.showToast = (msg, type) => toasts.push({ msg, type });
+
+  const select = doc.querySelector('[data-tm-forfeit="m1"]');
+  select.value = 'a';
+  select.dispatchEvent(new window.Event('change', { bubbles: true }));
+  doc.querySelector('[data-save-tm="m1"]').click();
+  await new Promise(r => setTimeout(r, 40));
+
+  assert.equal(toasts.length, 1, '应弹出一条错误提示');
+  assert.equal(toasts[0].type, 'error');
+  assert.ok(toasts[0].msg.includes('supabase-schema.sql'), '提示应引导管理员部署 SQL：' + toasts[0].msg);
+  assert.ok(!toasts[0].msg.includes('Could not find the function'), '不应把 PostgREST 原始报错直接抛给用户');
 });
